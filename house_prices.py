@@ -66,14 +66,14 @@ class HousePrices(object):
         # self.feature_scaling(df)
         return df
 
-    def   indices_with_none_or_nan_values_logical(self, df, axis=1):
-        # Logical extracting only columns with non-NA/null values.
-        # False is when NA/null values occur. I.e. when mask[mask == 0].
-        agg_axis = 1 - axis
-        agg_obj = df[:][:]
-        # Return Series with number of non-NA/null observations over requested axis
-        count = agg_obj.count(axis=agg_axis)
-        mask = count == len(agg_obj._get_axis(agg_axis))
+
+    def features_with_null_logical(self, df, axis=1):
+        row_length = len(df._get_axis(0))
+        # Axis to count non null values in. aggregate_axis=0 implies counting for every feature
+        aggregate_axis = 1 - axis
+        features_non_null_series = df.count(axis=aggregate_axis)
+        # Whenever count() differs from row_length it implies a null value exists in feature column and a False in mask
+        mask = row_length == features_non_null_series
         return mask
 
 
@@ -90,6 +90,11 @@ class HousePrices(object):
         # Scales all features to be values in [0,1]
         features = list(df.columns)
         df[features] = df[features].apply(lambda x: x/x.max(), axis=0)
+
+    def missing_values_in_DataFrame(self, df):
+        mask = self.features_with_null_logical(df)
+        print(df[mask[mask == 0].index.values].isnull().sum())
+        print('\n')
 
 
 def main():
@@ -142,29 +147,23 @@ def main():
     # Using only numerical feature columns as first approach.
     # Print numeric feature columns with none or nan in test data
     print '\nColumns in train data with none/nan values:\n'
-    df_publ_numerical_features = house_prices.extract_numerical_features(df_publ)
-    mask = house_prices.  indices_with_none_or_nan_values_logical(df_publ_numerical_features)
     print('\nTraining set numerical features\' missing values')
-    print(df_publ_numerical_features[mask[mask == 0].index.values].isnull().sum())
-    print('\n')
+    df_publ_numerical_features = house_prices.extract_numerical_features(df_publ)
+    house_prices.missing_values_in_DataFrame(df_publ_numerical_features)
 
     # Print numeric feature columns with none/nan in test data
     print '\nColumns in test data with none/nan values:\n'
-    df_test_publ_numerical_features = house_prices.extract_numerical_features(df_test_publ)
-    mask = house_prices.  indices_with_none_or_nan_values_logical(df_test_publ_numerical_features)
     print('\nTest set numerical features\' missing values')
-    print(df_test_publ_numerical_features[mask[mask == 0].index.values].isnull().sum())
-    print('\n')
+    df_test_publ_numerical_features = house_prices.extract_numerical_features(df_test_publ)
+    house_prices.missing_values_in_DataFrame(df_test_publ_numerical_features)
 
-    # Imputation method applied to numeric columns in test data with non/nan values
-    df_imputed = house_prices.estimate_by_mice(df_publ_numerical_features)
-    mask = house_prices.  indices_with_none_or_nan_values_logical(df_imputed)
+    # Imputation method applied to numeric columns in test data with none/nan values
     print("Training set missing values after imputation")
-    print(df_imputed[mask[mask == 0].index.values].isnull().sum())
-    df_test_imputed = house_prices.estimate_by_mice(df_test_publ_numerical_features)
-    mask = house_prices.  indices_with_none_or_nan_values_logical(df_test_imputed)
+    df_imputed = house_prices.estimate_by_mice(df_publ_numerical_features)
+    house_prices.missing_values_in_DataFrame(df_imputed)
     print("Testing set missing values after imputation")
-    print(df_test_imputed[mask[mask == 0].index.values].isnull().sum())
+    df_test_imputed = house_prices.estimate_by_mice(df_test_publ_numerical_features)
+    house_prices.missing_values_in_DataFrame(df_test_imputed)
 
 
     ''' Explore data '''
@@ -174,14 +173,10 @@ def main():
         print('Total Records for missing values: {}\n'.format(house_prices.df.isnull().sum().sum() + house_prices.df_test.isnull().sum().sum()))
 
         print('Training set missing values')
-        mask = house_prices.  indices_with_none_or_nan_values_logical(house_prices.df)
-        print(house_prices.df[mask[mask == 0].index.values].isnull().sum())
-        print('\n')
+        house_prices.missing_values_in_DataFrame(house_prices.df)
 
         print('Test set missing values')
-        mask = house_prices.  indices_with_none_or_nan_values_logical(house_prices.df_test)
-        print(house_prices.df_test[mask[mask == 0].index.values].isnull().sum())
-        print('\n')
+        house_prices.missing_values_in_DataFrame(house_prices.df_test)
 
         print("\n=== AFTER IMPUTERS ===\n")
         print("=== Check for missing values in set ===")
@@ -190,13 +185,10 @@ def main():
         print('Total Records for missing values: {}\n'.format(df.isnull().sum().sum() + df_test.isnull().sum().sum()))
 
         print("Training set missing values")
-        mask = house_prices.  indices_with_none_or_nan_values_logical(df)
-        print(df[mask[mask == 0].index.values].isnull().sum())
-        print("\n")
+        house_prices.missing_values_in_DataFrame(df)
 
         print("Testing set missing values")
-        mask = house_prices.  indices_with_none_or_nan_values_logical(df_test)
-        print(df_test[mask[mask == 0].index.values].isnull().sum())
+        house_prices.missing_values_in_DataFrame(df_test)
 
         # SalePrice square meter plot
         # Overview of data with histograms
@@ -263,7 +255,6 @@ def main():
         print '\nSCORE XGBRegressor train data:---------------------------------------------------'
         print(clf.best_score_)
         print(clf.best_params_)
-
 
 
 
