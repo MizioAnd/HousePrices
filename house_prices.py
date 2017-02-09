@@ -30,24 +30,31 @@ class HousePrices(object):
     def extract_numerical_features(self, df):
         return df.select_dtypes(include=[np.number])
 
+    def extract_non_numerical_features(self, df):
+        return df.select_dtypes(exclude=[np.number])
+
+
     def clean_data(self, df):
+        df = df.copy()
         # Drop all non numeric type features
-        if any('SalePrice' == df.columns.values):
-            drop_non_or_nan_rows = 0
-            if drop_non_or_nan_rows:
+        # if any('SalePrice' == df.columns.values):
+        #     drop_non_or_nan_rows = 0
+        #     if drop_non_or_nan_rows:
                 # Additionally for training data, drop all rows with nulls
-                df_cleaned = self.extract_numerical_features(df).dropna()
-            else:
-                df_cleaned = self.extract_numerical_features(df)
-        else:
-            df_cleaned = self.extract_numerical_features(df)
+                # df_cleaned = self.extract_numerical_features(df).dropna()
+            # else:
+            #     df_cleaned = self.extract_numerical_features(df)
+        # else:
+        #     df_cleaned = self.extract_numerical_features(df)
 
         # Imputation using MICE
-        df_cleaned = self.estimate_by_mice(df_cleaned)
-        return df_cleaned
+        numerical_features_names = self.extract_numerical_features(df)._get_axis(1).values
+        df[numerical_features_names] = self.estimate_by_mice(df[numerical_features_names])
+        return df
 
     def feature_engineering(self, df):
         df['LotAreaSquareMeters'] = self.square_feet_to_meters(df.LotArea.values)
+
 
 
 
@@ -60,7 +67,8 @@ class HousePrices(object):
         return df
 
     def prepare_data_random_forest(self, df):
-        # df = self.clean_data(df)
+        df = df.copy()
+        df = self.clean_data(df)
         self.feature_engineering(df)
         # df = self.drop_variable(df)
         # self.feature_scaling(df)
@@ -78,7 +86,7 @@ class HousePrices(object):
 
 
     def estimate_by_mice(self, df):
-        df_estimated_var = df[:][:]
+        df_estimated_var = df.copy()
         random.seed(129)
         mice = MICE()  #model=RandomForestClassifier(n_estimators=100))
         res = mice.complete(df.values)
@@ -118,8 +126,8 @@ def main():
     ''' Prepare data '''
 
     house_prices = HousePrices()
-    df_publ = house_prices.df[:][:]
-    df_test_publ = house_prices.df_test[:][:]
+    df_publ = house_prices.df.copy()
+    df_test_publ = house_prices.df_test.copy()
 
 
     df = house_prices.prepare_data_random_forest(df_publ)
@@ -184,17 +192,29 @@ def main():
         print('\nTotal Records for values: {}\n'.format(df.count().sum() + df_test.count().sum()))
         print('Total Records for missing values: {}\n'.format(df.isnull().sum().sum() + df_test.isnull().sum().sum()))
 
+        # Overview of missing values in non numerical features
         print("Training set missing values")
         house_prices.missing_values_in_DataFrame(df)
-
         print("Testing set missing values")
         house_prices.missing_values_in_DataFrame(df_test)
+
+        print("Training set with all non numerical features without missing values\n")
+        df_all_non_numerical_features = house_prices.extract_non_numerical_features(df_publ)
+        print df_all_non_numerical_features.count()
+        # house_prices.missing_values_in_DataFrame(df)
+        print("\nTesting set with all non numerical features without missing values\n")
+        df_test_all_non_numerical_features = house_prices.extract_non_numerical_features(df_test_publ)
+        print df_test_all_non_numerical_features.count()
+        # house_prices.missing_values_in_DataFrame(df_test)
+
+
 
         # SalePrice square meter plot
         # Overview of data with histograms
         feature_to_plot = ['LotAreaSquareMeters', 'LotFrontage', 'MasVnrArea', 'GarageYrBlt']
         # feature_to_plot = ['YearBuilt', 'SalePrice', 'LotAreaSquareMeters', 'OverallCond', 'TotalBsmtSF']
-        df_imputed_prepared = house_prices.prepare_data_random_forest(df_imputed)
+        df_imputed_prepared = df_imputed.copy()
+        house_prices.feature_engineering(df_imputed_prepared)
         bin_number = 25
         df[df.LotAreaSquareMeters <= 2500.0][feature_to_plot].hist(bins=bin_number, alpha=.5)
         df_imputed_prepared[df_imputed_prepared.LotAreaSquareMeters <= 2500.0][feature_to_plot].hist(bins=bin_number, alpha=.5)
@@ -255,8 +275,6 @@ def main():
         print '\nSCORE XGBRegressor train data:---------------------------------------------------'
         print(clf.best_score_)
         print(clf.best_params_)
-
-
 
 
         ''' Submission '''
