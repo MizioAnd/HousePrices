@@ -11,13 +11,15 @@ from fancyimpute import MICE
 # sys.path.append('/custom/path/to/modules')
 import random
 from sklearn.model_selection import cross_val_score
-from sklearn import preprocessing
-# from sklearn.ensemble import RandomForestClassifier
+from sklearn.preprocessing import LabelEncoder
+from sklearn.preprocessing import OneHotEncoder
+import math
 
 class HousePrices(object):
     def __init__(self):
         self.df = HousePrices.df
         self.df_test = HousePrices.df_test
+        self.df_all_feature_var_names = []
 
 
     ''' Pandas Data Frame '''
@@ -37,19 +39,8 @@ class HousePrices(object):
 
     def clean_data(self, df):
         df = df.copy()
-        # Drop all non numeric type features
-        # if any('SalePrice' == df.columns.values):
-        #     drop_non_or_nan_rows = 0
-        #     if drop_non_or_nan_rows:
-                # Additionally for training data, drop all rows with nulls
-                # df_cleaned = self.extract_numerical_features(df).dropna()
-            # else:
-            #     df_cleaned = self.extract_numerical_features(df)
-        # else:
-        #     df_cleaned = self.extract_numerical_features(df)
-
         # Imputation using MICE
-        numerical_features_names = self.extract_numerical_features(df)._get_axis(1).values
+        numerical_features_names = self.extract_numerical_features(df)._get_axis(1)
         df[numerical_features_names] = self.estimate_by_mice(df[numerical_features_names])
         return df
 
@@ -57,59 +48,90 @@ class HousePrices(object):
         # Transform non-numeric labels into numerical values
         # Cons.: gives additional unwanted structure to data, since some values are high and others low, despite labels where no such comparing measure exists.
         # Alternative: use one-hot-encoding giving all labels their own column represented with only binary values.
-        le = preprocessing.LabelEncoder()
+        le = LabelEncoder()
         le.fit(df[estimated_var].values)
         # Check that all values are represented
         list(le.classes_)
         df[''.join([estimated_var, 'Num'])] = le.transform(df[estimated_var].values)
 
+    def label_classes(self, df, estimated_var):
+        le = LabelEncoder()
+        le.fit(df[estimated_var].values)
+        return le.classes_
+
+
+    def one_hot_encoder(self, df, estimated_var):
+        ohe = OneHotEncoder()
+        # Get every feature_var_name and exclude nan in label_classes
+        label_classes = self.label_classes(df, estimated_var)
+        label_classes = np.asarray(map(lambda x: str(x), label_classes))
+        # if (estimated_var == 'SaleType') & (not any(df.columns == 'SalePrice')):
+        #     print 'hello'
+        # if any(label_classes == 'nan'):
+        #     print 'debug'
+        label_classes_is_not_nan = label_classes != 'nan'
+        label_classes = label_classes[label_classes_is_not_nan]
+        new_one_hot_encoded_features = map(lambda x: ''.join([estimated_var, '_', str(x)]), label_classes)
+
+        # Create new feature_var columns with one-hot encoded values
+        feature_var_values = ohe.fit_transform(np.reshape(np.array(df[''.join([estimated_var, 'Num'])].values), (df.shape[0], 1))).toarray().astype(int)
+        column_index = 0
+        for ite in new_one_hot_encoded_features:
+            df[ite] = feature_var_values[0::, column_index]
+            column_index += 1
+
+
+    def add_feature_var_name_with_zeros(self, df, feature_var_name):
+        df[feature_var_name] = np.zeros((df.shape[0], 1), dtype=int)
+        pass
+
+
+    def feature_var_names_in_training_set_not_in_test_set(self, feature_var_names_training, feature_var_names_test):
+        feature_var_name_addition_list = []
+        for feature_var_name in feature_var_names_training:
+            if not any(feature_var_name == feature_var_names_test):
+                feature_var_name_addition_list.append(feature_var_name)
+        return np.array(feature_var_name_addition_list)
+
+
     def feature_mapping_to_numerical_values(self, df):
-        # if any(df.columns == 'MSZoning'):
-        #     self.encode_labels_in_numeric_format(df, 'MSZoning')
-        if any(df.columns == 'Street'):
-            self.encode_labels_in_numeric_format(df, 'Street')
-        if any(df.columns == 'Alley'):
-            self.encode_labels_in_numeric_format(df, 'Alley')
-        if any(df.columns == 'LotShape'):
-            self.encode_labels_in_numeric_format(df, 'LotShape')
-        if any(df.columns == 'LandContour'):
-            self.encode_labels_in_numeric_format(df, 'LandContour')
-        if any(df.columns == 'Utilities'):
-            self.encode_labels_in_numeric_format(df, 'Utilities')
-        if any(df.columns == 'LandSlope'):
-            self.encode_labels_in_numeric_format(df, 'LandSlope')
-        if any(df.columns == 'Neighborhood'):
-            self.encode_labels_in_numeric_format(df, 'Neighborhood')
-        if any(df.columns == 'Condition1'):
-            self.encode_labels_in_numeric_format(df, 'Condition1')
-        if any(df.columns == 'BldgType'):
-            self.encode_labels_in_numeric_format(df, 'BldgType')
-        if any(df.columns == 'HouseStyle'):
-            self.encode_labels_in_numeric_format(df, 'HouseStyle')
+        is_one_hot_encoder = 1
+        if is_one_hot_encoder:
+            non_numerical_feature_names = self.extract_non_numerical_features(df)._get_axis(1)
+            for feature_name in non_numerical_feature_names:
+                self.encode_labels_in_numeric_format(df, feature_name)
+                self.one_hot_encoder(df, feature_name)
+
+            # Assume that training set has all possible feature_var_names
+            # Although it may occur in real life that a training set may hold a feature_var_name. But it is probably avoided since such features cannot
+            # be part of the trained learning algo.
+            # Add missing feature_var_names of traning set not occuring in test set. Add these with zeros in columns.
+            if not any(df.columns == 'SalePrice'):
+                feature_var_names_traning_set = self.df_all_feature_var_names
+                feature_var_name_addition_list = self.feature_var_names_in_training_set_not_in_test_set(feature_var_names_traning_set, df.columns)
+                for ite in feature_var_name_addition_list:
+                    self.add_feature_var_name_with_zeros(df, ite)
 
 
     def feature_engineering(self, df):
         df['LotAreaSquareMeters'] = self.square_feet_to_meters(df.LotArea.values)
 
 
-
-
     def drop_variable(self, df):
-        if any('SalePrice' == df.columns.values):
-            return df
-        else:
-            # Drop the set of features in test data that has null in column
-            df = df.dropna(axis=1)
+        # Drop all categorical feature columns
+        non_numerical_feature_names = self.extract_non_numerical_features(df)._get_axis(1)
+        for feature_name in non_numerical_feature_names:
+            df = df.drop([''.join([feature_name, 'Num'])], axis=1)
+            df = df.drop([feature_name], axis=1)
         return df
+
 
     def prepare_data_random_forest(self, df):
         df = df.copy()
         self.feature_mapping_to_numerical_values(df)
         df = self.clean_data(df)
         self.feature_engineering(df)
-        # if missing_values:
-        #     df = self.clean_data(df)
-        # df = self.drop_variable(df)
+        df = self.drop_variable(df)
         # df = self.feature_scaling(df)
         return df
 
@@ -147,9 +169,6 @@ class HousePrices(object):
 
 
 def main():
-    # from graphviz import plot_tree
-    # from graphviz import Digraph
-    # dot = Digraph(comment='The Round Table')
     import xgboost as xgb
     from sklearn.ensemble import RandomForestClassifier
     from sklearn.ensemble import RandomForestRegressor
@@ -172,6 +191,7 @@ def main():
 
 
     df = house_prices.prepare_data_random_forest(df_publ)
+    house_prices.df_all_feature_var_names = df[df.columns[df.columns != 'SalePrice']].columns
     print '\n TRAINING DATA:----------------------------------------------- \n'
     print df.head(3)
     print '\n'
@@ -188,14 +208,19 @@ def main():
     print df_test.describe()
     print '\n'
 
-    train_data = house_prices.extract_numerical_features(df).values
-    test_data = house_prices.extract_numerical_features(df_test).values
+    # Check if feature_var_names of test exist that do not appear in training set
+    feature_var_names_addition_to_training_set = house_prices.feature_var_names_in_training_set_not_in_test_set(df_test.columns, df.columns)
+
+    train_data = df.values
+    test_data = df_test.values
+    # train_data = house_prices.extract_numerical_features(df).values
+    # test_data = house_prices.extract_numerical_features(df_test).values
 
 
 
 
     ''' Explore data '''
-    explore_data = 1
+    explore_data = 0
     if explore_data:
 
         # Imputation for the 11 columns with none or nan values in the test data.
@@ -299,7 +324,6 @@ def main():
         g.map(sns.violinplot, palette='pastel')
         plt.show()
 
-
         # Quite slow
         # sns.swarmplot(x='MSZoning', y='MSSubClass', data=df, hue='LandContour')
         # plt.show()
@@ -316,6 +340,7 @@ def main():
         y_train = train_data[0::, -1]
         x_train = np.asarray(x_train, dtype=long)
         y_train = np.asarray(y_train, dtype=long)
+        # test_data = np.asarray(test_data, dtype=long)
 
         # Todo: OBS. the below strategy with RandomForestClassifier produces best prediction 07.02.17
         # Random forest classifier based on cross validation parameter dictionary
@@ -324,21 +349,21 @@ def main():
         parameter_grid = {'max_depth': [4,5,6,7,8], 'n_estimators': [200,210,240,250],'criterion': ['gini', 'entropy']}
         cross_validation = StratifiedKFold(random_state=None, shuffle=False)  #, n_folds=10)
         grid_search = GridSearchCV(forest, param_grid=parameter_grid, cv=cross_validation, n_jobs=24)
-        grid_search = grid_search.fit(x_train, y_train)
         output = grid_search.predict(test_data)
         print('Best score: {}'.format(grid_search.best_score_))
         print('Best parameters: {}'.format(grid_search.best_params_))
 
+
         # Random forest (rf) classifier for feature selection
         # forest_feature_selection = RandomForestClassifier()  #max_features='sqrt')#n_estimators=100)#, n_jobs=-1)#, max_depth=None, min_samples_split=2, random_state=0)#, max_features=np.sqrt(5))
         forest_feature_selection = RandomForestRegressor(n_estimators=100)
-        # forest_feature_selection = forest_feature_selection.fit(x_train, y_train)
-        forest_feature_selection = forest_feature_selection.fit(np.asarray(x_train, dtype=long), np.asarray(y_train, dtype=long))
-        # output = forest_feature_selection.predict(test_data)
+        forest_feature_selection = forest_feature_selection.fit(x_train, y_train)
+        # forest_feature_selection = forest_feature_selection.fit(np.asarray(x_train, dtype=long), np.asarray(y_train, dtype=long))
+        output = forest_feature_selection.predict(test_data)
         # output = forest_feature_selection.predict(np.asarray(test_data, dtype=long))
-        print np.shape(output)
-        # score = forest_feature_selection.score(x_train, y_train)
-        score = forest_feature_selection.score(np.asarray(x_train, dtype=long), np.asarray(y_train, dtype=long))
+        # print np.shape(output)
+        score = forest_feature_selection.score(x_train, y_train)
+        # score = forest_feature_selection.score(np.asarray(x_train, dtype=long), np.asarray(y_train, dtype=long))
         print '\nSCORE random forest train data:---------------------------------------------------'
         print score
 
@@ -352,9 +377,9 @@ def main():
         use_xgbRegressor = 0
         if use_xgbRegressor:
             # Is a parallel job
-            xgb_model = xgb.XGBRegressor()
+            # xgb_model = xgb.XGBRegressor()
             # XGBClassifier gives the best prediction
-            # xgb_model = xgb.XGBClassifier()
+            xgb_model = xgb.XGBClassifier()
             cross_validation = StratifiedKFold(shuffle=False, random_state=None)  # , n_folds=10)
             # parameter_grid = {'max_depth': [4, 5, 6, 7, 8], 'n_estimators': [200, 210, 240, 250]}
             parameter_grid = {'max_depth': [2, 4, 6], 'n_estimators': [50, 100, 200]}  #, 'criterion': ['gini', 'entropy']}
@@ -364,7 +389,6 @@ def main():
             print '\nSCORE XGBRegressor train data:---------------------------------------------------'
             print(clf.best_score_)
             print(clf.best_params_)
-
 
 
         ''' Submission '''
