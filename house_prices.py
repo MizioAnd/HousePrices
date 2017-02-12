@@ -130,7 +130,7 @@ class HousePrices(object):
         df = df.copy()
         self.feature_mapping_to_numerical_values(df)
         df = self.clean_data(df)
-        self.feature_engineering(df)
+        # self.feature_engineering(df)
         df = self.drop_variable(df)
         # df = self.feature_scaling(df)
         return df
@@ -215,6 +215,36 @@ def main():
     test_data = df_test.values
     # train_data = house_prices.extract_numerical_features(df).values
     # test_data = house_prices.extract_numerical_features(df_test).values
+
+
+    is_simple_model = 1
+    if is_simple_model:
+        df_simple_model = house_prices.extract_numerical_features(df_publ)
+        df_simple_model = house_prices.estimate_by_mice(df_simple_model)
+        df_test_simple_model = house_prices.extract_numerical_features(df_test_publ)
+
+        # Prepare simple model
+        # df_simple_model.dropna()
+        df_test_simple_model.dropna(axis=1)
+        df_test_simple_model = house_prices.estimate_by_mice(df_test_simple_model)
+        df_simple_model = df_simple_model[df_test_simple_model.columns.insert(np.shape(df_test_simple_model.columns)[0], 'SalePrice')]
+
+
+        train_data_simple = df_simple_model.values
+        test_data_simple = df_test_simple_model.values
+        x_train = train_data_simple[0::, :-1]
+        y_train = train_data_simple[0::, -1]
+
+        forest = RandomForestClassifier(max_features='sqrt')  #n_estimators=100)#, n_jobs=-1)#, max_depth=None, min_samples_split=2, random_state=0)#, max_features=np.sqrt(5))
+        parameter_grid = {'max_depth': [4,5,6,7,8], 'n_estimators': [200,210,240,250],'criterion': ['gini', 'entropy']}
+        cross_validation = StratifiedKFold(random_state=None, shuffle=False)  #, n_folds=10)
+        grid_search = GridSearchCV(forest, param_grid=parameter_grid, cv=cross_validation, n_jobs=24)
+        grid_search.fit(x_train, y_train)
+        output = grid_search.predict(test_data_simple)
+        print('Best score: {}'.format(grid_search.best_score_))
+        print('Best parameters: {}'.format(grid_search.best_params_))
+
+
 
 
 
@@ -349,6 +379,7 @@ def main():
         parameter_grid = {'max_depth': [4,5,6,7,8], 'n_estimators': [200,210,240,250],'criterion': ['gini', 'entropy']}
         cross_validation = StratifiedKFold(random_state=None, shuffle=False)  #, n_folds=10)
         grid_search = GridSearchCV(forest, param_grid=parameter_grid, cv=cross_validation, n_jobs=24)
+        grid_search.fit(x_train, y_train)
         output = grid_search.predict(test_data)
         print('Best score: {}'.format(grid_search.best_score_))
         print('Best parameters: {}'.format(grid_search.best_params_))
@@ -373,7 +404,7 @@ def main():
 
 
         ''' xgboost '''
-        # Grid search xgb
+         # Grid search xgb
         use_xgbRegressor = 0
         if use_xgbRegressor:
             # Is a parallel job
@@ -391,6 +422,9 @@ def main():
             print(clf.best_params_)
 
 
+
+
+    if is_simple_model or is_make_a_prediction:
         ''' Submission '''
         save_path = '/home/user/Documents/Kaggle/HousePrices/submission/'
         # Submission requires a csv file with Id and SalePrice columns.
