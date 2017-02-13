@@ -1,6 +1,6 @@
 # Predict the SalePrice
 __author__ = 'mizio'
-import csv as csv
+# import csv as csv
 import numpy as np
 import pandas as pd
 # import matplotlib
@@ -10,10 +10,12 @@ from fancyimpute import MICE
 # import sys
 # sys.path.append('/custom/path/to/modules')
 import random
-from sklearn.model_selection import cross_val_score
+# from sklearn.model_selection import cross_val_score
 from sklearn.preprocessing import LabelEncoder
 from sklearn.preprocessing import OneHotEncoder
-import math
+from scipy.stats import skew
+from sklearn.model_selection import cross_val_score
+# import math
 
 class HousePrices(object):
     def __init__(self):
@@ -31,9 +33,11 @@ class HousePrices(object):
         return area*square_meter_per_square_feet
 
     def extract_numerical_features(self, df):
+        df = df.copy()
         return df.select_dtypes(include=[np.number])
 
     def extract_non_numerical_features(self, df):
+        df = df.copy()
         return df.select_dtypes(exclude=[np.number])
 
 
@@ -95,7 +99,7 @@ class HousePrices(object):
 
 
     def feature_mapping_to_numerical_values(self, df):
-        is_one_hot_encoder = 1
+        is_one_hot_encoder = 0
         if is_one_hot_encoder:
             non_numerical_feature_names = self.extract_non_numerical_features(df)._get_axis(1)
             for feature_name in non_numerical_feature_names:
@@ -112,9 +116,26 @@ class HousePrices(object):
                 for ite in feature_var_name_addition_list:
                     self.add_feature_var_name_with_zeros(df, ite)
 
+        is_label_encoder = 1
+        if is_label_encoder:
+            non_numerical_feature_names = self.extract_non_numerical_features(df)._get_axis(1)
+            for feature_name in non_numerical_feature_names:
+                self.encode_labels_in_numeric_format(df, feature_name)
+                # if (feature_name == 'MSZoning') or (feature_name == 'SaleCondition'):
+                # if (feature_name == 'SaleCondition'):
+                #     self.encode_labels_in_numeric_format(df, feature_name)
 
     def feature_engineering(self, df):
-        df['LotAreaSquareMeters'] = self.square_feet_to_meters(df.LotArea.values)
+        # df['LotAreaSquareMeters'] = self.square_feet_to_meters(df.LotArea.values)
+        if any(df.columns == 'SalePrice'):
+            df["SalePrice"] = np.log1p(df["SalePrice"])
+
+        # log transform skewed numeric features:
+        numeric_feats = df.dtypes[df.dtypes != "object"].index
+        skewed_feats = df[numeric_feats].apply(lambda x: skew(x.dropna()))  # compute skewness
+        skewed_feats = skewed_feats[skewed_feats > 0.75]
+        skewed_feats = skewed_feats.index
+        df[skewed_feats] = np.log1p(df[skewed_feats])
 
 
     def drop_variable(self, df):
@@ -129,9 +150,9 @@ class HousePrices(object):
     def prepare_data_random_forest(self, df):
         df = df.copy()
         self.feature_mapping_to_numerical_values(df)
+        self.feature_engineering(df)
         df = self.clean_data(df)
-        # self.feature_engineering(df)
-        df = self.drop_variable(df)
+        # df = self.drop_variable(df)
         # df = self.feature_scaling(df)
         return df
 
@@ -167,21 +188,28 @@ class HousePrices(object):
         print(df[mask[mask == 0].index.values].isnull().sum())
         print('\n')
 
+    def rmse_cv(self, model, x_train, y_train):
+        rmse = np.sqrt(-cross_val_score(model, x_train, y_train, scoring='neg_mean_squared_error', cv=5))
+        return (rmse)
+
 
 def main():
     import xgboost as xgb
     from sklearn.ensemble import RandomForestClassifier
     from sklearn.ensemble import RandomForestRegressor
-    from sklearn.linear_model import LogisticRegression
+    from sklearn.linear_model import SGDRegressor
+    from sklearn.linear_model import Ridge
+    from sklearn.linear_model import Lasso, LassoCV
+    # from sklearn.linear_model import LogisticRegression
     from sklearn.feature_selection import SelectFromModel
-    from sklearn.naive_bayes import GaussianNB
-    from sklearn import svm
-    from collections import OrderedDict
-    from sklearn.ensemble import IsolationForest
+    # from sklearn.naive_bayes import GaussianNB
+    # from sklearn import svm
+    # from collections import OrderedDict
+    # from sklearn.ensemble import IsolationForest
     import seaborn as sns
     from sklearn.model_selection import StratifiedKFold
     from sklearn.model_selection import GridSearchCV
-    from sklearn.model_selection import KFold, train_test_split
+    # from sklearn.model_selection import KFold, train_test_split
 
     ''' Prepare data '''
 
@@ -211,20 +239,19 @@ def main():
     # Check if feature_var_names of test exist that do not appear in training set
     feature_var_names_addition_to_training_set = house_prices.feature_var_names_in_training_set_not_in_test_set(df_test.columns, df.columns)
 
-    train_data = df.values
-    test_data = df_test.values
-    # train_data = house_prices.extract_numerical_features(df).values
-    # test_data = house_prices.extract_numerical_features(df_test).values
+    # train_data = df.values
+    # test_data = df_test.values
+    train_data = house_prices.extract_numerical_features(df).values
+    test_data = house_prices.extract_numerical_features(df_test).values
 
 
-    is_simple_model = 1
+    is_simple_model = 0
     if is_simple_model:
-        df_simple_model = house_prices.extract_numerical_features(df_publ)
-        df_simple_model = house_prices.estimate_by_mice(df_simple_model)
-        df_test_simple_model = house_prices.extract_numerical_features(df_test_publ)
+        df_simple_model = house_prices.clean_data(df_publ)
 
         # Prepare simple model
         # df_simple_model.dropna()
+        df_test_simple_model = house_prices.extract_numerical_features(df_test_publ)
         df_test_simple_model.dropna(axis=1)
         df_test_simple_model = house_prices.estimate_by_mice(df_test_simple_model)
         df_simple_model = df_simple_model[df_test_simple_model.columns.insert(np.shape(df_test_simple_model.columns)[0], 'SalePrice')]
@@ -250,167 +277,249 @@ def main():
 
 
     ''' Explore data '''
-    explore_data = 0
+    explore_data = 1
     if explore_data:
 
-        # Imputation for the 11 columns with none or nan values in the test data.
-        # Using only numerical feature columns as first approach.
-        # Print numeric feature columns with none or nan in test data
-        print '\nColumns in train data with none/nan values:\n'
-        print('\nTraining set numerical features\' missing values')
-        df_publ_numerical_features = house_prices.extract_numerical_features(df_publ)
-        house_prices.missing_values_in_DataFrame(df_publ_numerical_features)
+        is_missing_value_exploration = 0
+        if is_missing_value_exploration:
+            # Imputation for the 11 columns with none or nan values in the test data.
+            # Using only numerical feature columns as first approach.
+            # Print numeric feature columns with none or nan in test data
+            print '\nColumns in train data with none/nan values:\n'
+            print('\nTraining set numerical features\' missing values')
+            df_publ_numerical_features = house_prices.extract_numerical_features(df_publ)
+            house_prices.missing_values_in_DataFrame(df_publ_numerical_features)
 
-        # Print numeric feature columns with none/nan in test data
-        print '\nColumns in test data with none/nan values:\n'
-        print('\nTest set numerical features\' missing values')
-        df_test_publ_numerical_features = house_prices.extract_numerical_features(df_test_publ)
-        house_prices.missing_values_in_DataFrame(df_test_publ_numerical_features)
+            # Print numeric feature columns with none/nan in test data
+            print '\nColumns in test data with none/nan values:\n'
+            print('\nTest set numerical features\' missing values')
+            df_test_publ_numerical_features = house_prices.extract_numerical_features(df_test_publ)
+            house_prices.missing_values_in_DataFrame(df_test_publ_numerical_features)
 
-        # Imputation method applied to numeric columns in test data with none/nan values
-        print("Training set missing values after imputation")
-        df_imputed = house_prices.estimate_by_mice(df_publ_numerical_features)
-        house_prices.missing_values_in_DataFrame(df_imputed)
-        print("Testing set missing values after imputation")
-        df_test_imputed = house_prices.estimate_by_mice(df_test_publ_numerical_features)
-        house_prices.missing_values_in_DataFrame(df_test_imputed)
+            # Imputation method applied to numeric columns in test data with none/nan values
+            print("Training set missing values after imputation")
+            df_imputed = house_prices.estimate_by_mice(df_publ_numerical_features)
+            house_prices.missing_values_in_DataFrame(df_imputed)
+            print("Testing set missing values after imputation")
+            df_test_imputed = house_prices.estimate_by_mice(df_test_publ_numerical_features)
+            house_prices.missing_values_in_DataFrame(df_test_imputed)
 
-        print('\nTotal Records for values: {}\n'.format(house_prices.df.count().sum() + house_prices.df_test.count().sum()))
-        print('Total Records for missing values: {}\n'.format(house_prices.df.isnull().sum().sum() + house_prices.df_test.isnull().sum().sum()))
+            print('\nTotal Records for values: {}\n'.format(house_prices.df.count().sum() + house_prices.df_test.count().sum()))
+            print('Total Records for missing values: {}\n'.format(house_prices.df.isnull().sum().sum() + house_prices.df_test.isnull().sum().sum()))
 
-        print('Training set missing values')
-        house_prices.missing_values_in_DataFrame(house_prices.df)
+            print('Training set missing values')
+            house_prices.missing_values_in_DataFrame(house_prices.df)
 
-        print('Test set missing values')
-        house_prices.missing_values_in_DataFrame(house_prices.df_test)
+            print('Test set missing values')
+            house_prices.missing_values_in_DataFrame(house_prices.df_test)
 
-        print("\n=== AFTER IMPUTERS ===\n")
-        print("=== Check for missing values in set ===")
-        # Todo: fix the bug that "Total Records for missing values" stays unchanged while "Total Records for values" changes
-        print('\nTotal Records for values: {}\n'.format(df.count().sum() + df_test.count().sum()))
-        print('Total Records for missing values: {}\n'.format(df.isnull().sum().sum() + df_test.isnull().sum().sum()))
+            print("\n=== AFTER IMPUTERS ===\n")
+            print("=== Check for missing values in set ===")
+            # Todo: fix the bug that "Total Records for missing values" stays unchanged while "Total Records for values" changes
+            print('\nTotal Records for values: {}\n'.format(df.count().sum() + df_test.count().sum()))
+            print('Total Records for missing values: {}\n'.format(df.isnull().sum().sum() + df_test.isnull().sum().sum()))
 
-        # Overview of missing values in non numerical features
-        print("Training set missing values")
-        house_prices.missing_values_in_DataFrame(df)
-        print("Testing set missing values")
-        house_prices.missing_values_in_DataFrame(df_test)
+            # Overview of missing values in non numerical features
+            print("Training set missing values")
+            house_prices.missing_values_in_DataFrame(df)
+            print("Testing set missing values")
+            house_prices.missing_values_in_DataFrame(df_test)
 
-        print("Training set with all non numerical features without missing values\n")
-        df_all_non_numerical_features = house_prices.extract_non_numerical_features(df_publ)
-        print df_all_non_numerical_features.count()
-        # house_prices.missing_values_in_DataFrame(df)
-        print("\nTesting set with all non numerical features without missing values\n")
-        df_test_all_non_numerical_features = house_prices.extract_non_numerical_features(df_test_publ)
-        print df_test_all_non_numerical_features.count()
-        # house_prices.missing_values_in_DataFrame(df_test)
-
-
+            print("Training set with all non numerical features without missing values\n")
+            df_all_non_numerical_features = house_prices.extract_non_numerical_features(df_publ)
+            print df_all_non_numerical_features.count()
+            # house_prices.missing_values_in_DataFrame(df)
+            print("\nTesting set with all non numerical features without missing values\n")
+            df_test_all_non_numerical_features = house_prices.extract_non_numerical_features(df_test_publ)
+            print df_test_all_non_numerical_features.count()
+            # house_prices.missing_values_in_DataFrame(df_test)
 
 
-        # SalePrice square meter plot
-        # Overview of data with histograms
-        feature_to_plot = ['LotAreaSquareMeters', 'LotFrontage', 'MasVnrArea', 'GarageYrBlt']
-        # feature_to_plot = ['YearBuilt', 'SalePrice', 'LotAreaSquareMeters', 'OverallCond', 'TotalBsmtSF']
-        df_imputed_prepared = df_imputed.copy()
-        house_prices.feature_engineering(df_imputed_prepared)
-        bin_number = 25
-        # df[df.LotAreaSquareMeters <= 2500.0][feature_to_plot].hist(bins=bin_number, alpha=.5)
-        # df_imputed_prepared[df_imputed_prepared.LotAreaSquareMeters <= 2500.0][feature_to_plot].hist(bins=bin_number, alpha=.5)
 
-        # We expect more houses to be sold in the summer. Which is also the case month MM, year YYYY.
-        # Sale tops in juli
-        # df[['MoSold', 'YrSold']].dropna().hist(bins='auto', alpha=.5)
-        # plt.show()
-        # plt.close()
+
+            # SalePrice square meter plot
+            # Overview of data with histograms
+            feature_to_plot = ['LotAreaSquareMeters', 'LotFrontage', 'MasVnrArea', 'GarageYrBlt']
+            # feature_to_plot = ['YearBuilt', 'SalePrice', 'LotAreaSquareMeters', 'OverallCond', 'TotalBsmtSF']
+            df_imputed_prepared = df_imputed.copy()
+            house_prices.feature_engineering(df_imputed_prepared)
+            bin_number = 25
+            # df[df.LotAreaSquareMeters <= 2500.0][feature_to_plot].hist(bins=bin_number, alpha=.5)
+            # df_imputed_prepared[df_imputed_prepared.LotAreaSquareMeters <= 2500.0][feature_to_plot].hist(bins=bin_number, alpha=.5)
+
+            # We expect more houses to be sold in the summer. Which is also the case month MM, year YYYY.
+            # Sale tops in juli
+            # df[['MoSold', 'YrSold']].dropna().hist(bins='auto', alpha=.5)
+            # plt.show()
+            # plt.close()
 
         # Categorical plot with seaborn
-        # sns.countplot(y='MSZoning', hue='MSSubClass', data=df, palette='Greens_d')
-        # plt.show()
-        # sns.stripplot(x='SalePrice', y='MSZoning', data=df, jitter=True, hue='LandContour')
-        # plt.show()
-        # sns.boxplot(x='SalePrice', y='MSZoning', data=df, hue='MSSubClass')
-        # plt.show()
-        # sns.boxplot(x='SalePrice', y='MSZoning', data=df)
-        # plt.show()
-        sns.boxplot(x='SalePrice', y='Neighborhood', data=df)
-        plt.show()
-        # sns.violinplot(x='SalePrice', y='MSZoning', data=df)
-        # plt.show()
-        sns.violinplot(x='SalePrice', y='Neighborhood', data=df)
-        plt.show()
+        is_categorical_plot = 0
+        if is_categorical_plot:
+            # sns.countplot(y='MSZoning', hue='MSSubClass', data=df, palette='Greens_d')
+            # plt.show()
+            # sns.stripplot(x='SalePrice', y='MSZoning', data=df, jitter=True, hue='LandContour')
+            # plt.show()
+            # sns.boxplot(x='SalePrice', y='MSZoning', data=df, hue='MSSubClass')
+            # plt.show()
+            # sns.boxplot(x='SalePrice', y='MSZoning', data=df)
+            # plt.show()
+            sns.boxplot(x='SalePrice', y='Neighborhood', data=df)
+            plt.show()
+            sns.boxplot(x='SalePrice', y='SaleCondition', data=df)
+            plt.show()
 
-        # Arbitrary estimate, using the mean by default.
-        # It also uses bootstrapping to compute a confidence interval around the estimate and plots that using error bars
-        sns.barplot(x='SalePrice', y='MSZoning', hue='LotShape', data=df)
-        plt.show()
-        sns.barplot(x='SalePrice', y='Neighborhood', data=df)#, hue='LotShape')
-        plt.show()
-        sns.pointplot(x='SalePrice', y='MSZoning', hue='LotShape', data=df,
-                      palette={"Reg": "g", "IR1": "m", "IR2": "b", "IR3": "r"}, markers=["^", "o", 'x', '<'], linestyles=["-", "--", '-.', ':'])
-        plt.show()
+            # sns.violinplot(x='SalePrice', y='MSZoning', data=df)
+            # plt.show()
+            # sns.violinplot(x='SalePrice', y='Neighborhood', data=df)
+            # plt.show()
 
-        g = sns.PairGrid(df, x_vars=['SalePrice', 'LotArea'], y_vars=['MSZoning', 'Utilities', 'LotShape'], aspect=.75, size=3.5)
-        g.map(sns.violinplot, palette='pastel')
-        plt.show()
+            # Arbitrary estimate, using the mean by default.
+            # It also uses bootstrapping to compute a confidence interval around the estimate and plots that using error bars
+            sns.barplot(x='SalePrice', y='MSZoning', hue='LotShape', data=df)
+            plt.show()
+            sns.barplot(x='SalePrice', y='Neighborhood', data=df)#, hue='LotShape')
+            plt.show()
+            sns.barplot(x='SalePrice', y='SaleCondition', data=df)#, hue='LotShape')
+            plt.show()
 
-        # Quite slow
-        # sns.swarmplot(x='MSZoning', y='MSSubClass', data=df, hue='LandContour')
-        # plt.show()
+            # sns.pointplot(x='SalePrice', y='MSZoning', hue='LotShape', data=df,
+            #               palette={"Reg": "g", "IR1": "m", "IR2": "b", "IR3": "r"}, markers=["^", "o", 'x', '<'], linestyles=["-", "--", '-.', ':'])
+            # plt.show()
+
+            # g = sns.PairGrid(df, x_vars=['SalePrice', 'LotArea'], y_vars=['MSZoning', 'Utilities', 'LotShape'], aspect=.75, size=3.5)
+            # g.map(sns.violinplot, palette='pastel')
+            # plt.show()
+
+            # Quite slow
+            # sns.swarmplot(x='MSZoning', y='MSSubClass', data=df, hue='LandContour')
+            # plt.show()
 
 
 
+        is_choose_optimal_regularization_param = 0
+        if is_choose_optimal_regularization_param:
+            # Choose optimal value for alpha (regularization parameter) in Lasso and Ridge
+            x_train = train_data[0::, :-1]
+            y_train = train_data[0::, -1]
+            alphas = [0.05, 0.1, 0.3, 1, 3, 4, 10, 15, 30, 50, 75]
+            cv_ridge = [house_prices.rmse_cv(Ridge(alpha=alpha), x_train, y_train).mean() for alpha in alphas]
+            cv_ridge = pd.Series(cv_ridge, index=alphas)
+            cv_ridge.plot(title = "Validation")
+            plt.xlabel('alpha')
+            plt.ylabel('rmse')
+            plt.show()
+            print "\nOptimal regularization parameter alpha has rmse = "
+            print cv_ridge.min()
+
+            alphas = [0.0005, 0.001, 0.1, 1] #[1, 0.1, 0.001, 0.0005]
+            cv_lasso = [house_prices.rmse_cv(LassoCV(alphas=[alpha]), x_train, y_train).mean() for alpha in alphas]
+            cv_lasso = pd.Series(cv_lasso, index=alphas)
+            cv_lasso.plot(title="Validation")
+            plt.xlabel('alpha')
+            plt.ylabel('rmse')
+            plt.show()
+            print "\nOptimal regularization parameter alpha has rmse = "
+            print cv_lasso.min()
+
+            print "\nMean lasso rmse:"
+            model_lasso = LassoCV(alphas=[1, 0.1, 0.001, 0.0005]).fit(x_train, y_train)
+            print house_prices.rmse_cv(model_lasso, x_train, y_train).mean()
 
 
-    is_make_a_prediction = 0
+
+    is_make_a_prediction = 1
     if is_make_a_prediction:
         ''' Random Forest '''
         # Fit the training data to the survived labels and create the decision trees
         x_train = train_data[0::, :-1]
         y_train = train_data[0::, -1]
-        x_train = np.asarray(x_train, dtype=long)
-        y_train = np.asarray(y_train, dtype=long)
+        # x_train = np.asarray(x_train, dtype=long)
+        # y_train = np.asarray(y_train, dtype=long)
         # test_data = np.asarray(test_data, dtype=long)
 
         # Todo: OBS. the below strategy with RandomForestClassifier produces best prediction 07.02.17
         # Random forest classifier based on cross validation parameter dictionary
         # Create the random forest object which will include all the parameters for the fit
-        forest = RandomForestClassifier(max_features='sqrt')  #n_estimators=100)#, n_jobs=-1)#, max_depth=None, min_samples_split=2, random_state=0)#, max_features=np.sqrt(5))
-        parameter_grid = {'max_depth': [4,5,6,7,8], 'n_estimators': [200,210,240,250],'criterion': ['gini', 'entropy']}
-        cross_validation = StratifiedKFold(random_state=None, shuffle=False)  #, n_folds=10)
-        grid_search = GridSearchCV(forest, param_grid=parameter_grid, cv=cross_validation, n_jobs=24)
+        # forest = RandomForestClassifier(max_features='sqrt')  #n_estimators=100)#, n_jobs=-1)#, max_depth=None, min_samples_split=2, random_state=0)#, max_features=np.sqrt(5))
+        # forest = RandomForestClassifier(n_estimators=210, n_jobs=-1, max_depth=4, min_samples_split=2, criterion='entropy') #, random_state=0)#, max_features=np.sqrt(5))
+        # forest = RandomForestRegressor()
+        # forest = SGDRegressor()
+        # forest = Ridge(alpha=1.0)
+        # Regularized linear regression is needed to avoid overfitting even if you have lots of features
+        forest = Lasso(alpha=1.0)
+        # parameter_grid = {'max_depth': [4,5,6,7,8], 'n_estimators': [200,210,240,250]} #,'criterion': ['gini', 'entropy']}
+        # cross_validation = StratifiedKFold(random_state=None, shuffle=False)  #, n_folds=10)
+        # grid_search = GridSearchCV(forest, param_grid=parameter_grid, cv=cross_validation, n_jobs=24)
+        grid_search = forest
         grid_search.fit(x_train, y_train)
         output = grid_search.predict(test_data)
-        print('Best score: {}'.format(grid_search.best_score_))
-        print('Best parameters: {}'.format(grid_search.best_params_))
-
-
-        # Random forest (rf) classifier for feature selection
-        # forest_feature_selection = RandomForestClassifier()  #max_features='sqrt')#n_estimators=100)#, n_jobs=-1)#, max_depth=None, min_samples_split=2, random_state=0)#, max_features=np.sqrt(5))
-        forest_feature_selection = RandomForestRegressor(n_estimators=100)
-        forest_feature_selection = forest_feature_selection.fit(x_train, y_train)
-        # forest_feature_selection = forest_feature_selection.fit(np.asarray(x_train, dtype=long), np.asarray(y_train, dtype=long))
-        output = forest_feature_selection.predict(test_data)
-        # output = forest_feature_selection.predict(np.asarray(test_data, dtype=long))
-        # print np.shape(output)
-        score = forest_feature_selection.score(x_train, y_train)
-        # score = forest_feature_selection.score(np.asarray(x_train, dtype=long), np.asarray(y_train, dtype=long))
-        print '\nSCORE random forest train data:---------------------------------------------------'
+        score = forest.score(x_train, y_train)
+        # print('Best score: {}'.format(grid_search.best_score_))
+        # print('Best parameters: {}'.format(grid_search.best_params_))
+        print '\nSCORE random forest train (grid search optim) data:---------------------------------------------------'
         print score
 
-        # print titanic_panda_inst.compute_score_crossval(forest_feature_selection, x_train, y_train)
-        # Take the same decision trees and run it on the test data
-        # output = forest_feature_selection.predict(test_data)
+        is_feature_selection_prediction = 0
+        if is_feature_selection_prediction:
+
+            # Random forest (rf) classifier for feature selection
+            forest_feature_selection = RandomForestClassifier()  #max_features='sqrt')#n_estimators=100)#, n_jobs=-1)#, max_depth=None, min_samples_split=2, random_state=0)#, max_features=np.sqrt(5))
+            # forest_feature_selection = RandomForestRegressor(n_estimators=100)
+            forest_feature_selection = forest_feature_selection.fit(x_train, y_train)
+            # forest_feature_selection = forest_feature_selection.fit(np.asarray(x_train, dtype=long), np.asarray(y_train, dtype=long))
+            output = forest_feature_selection.predict(test_data)
+            # output = forest_feature_selection.predict(np.asarray(test_data, dtype=long))
+            # print np.shape(output)
+            score = forest_feature_selection.score(x_train, y_train)
+            # score = forest_feature_selection.score(np.asarray(x_train, dtype=long), np.asarray(y_train, dtype=long))
+            print '\nSCORE random forest train data:---------------------------------------------------'
+            print score
+
+            # print titanic_panda_inst.compute_score_crossval(forest_feature_selection, x_train, y_train)
+            # Take the same decision trees and run it on the test data
+            # output = forest_feature_selection.predict(test_data)
+
+            # Evaluate variable importance with no cross validation
+            importances = forest_feature_selection.feature_importances_
+            std = np.std([tree.feature_importances_ for tree in forest_feature_selection.estimators_], axis=0)
+            indices = np.argsort(importances)[::-1]
+
+            print '\nFeatures:'
+            df_test_num_features = house_prices.extract_numerical_features(df_test)
+            print np.reshape(
+                np.append(np.array(list(df_test_num_features)), np.arange(0, len(list(df_test_num_features)))),
+                (len(list(df_test_num_features)), 2),
+                'F')  # , 2, len(list(df_test)))
+
+            print 'Feature ranking:'
+            for f in range(x_train.shape[1]):
+                print '%d. feature %d (%f)' % (f + 1, indices[f], importances[indices[f]])
+
+            # Select most important features
+            feature_selection_model = SelectFromModel(forest_feature_selection, prefit=True)
+            x_train_new = feature_selection_model.transform(x_train)
+            print x_train_new.shape
+            # test_data_new = feature_selection_model.transform(test_data)
+            # print test_data_new.shape
+            # We get that four features are selected
+
+            forest_feature_selected = forest_feature_selection.fit(x_train_new, y_train)
+            score = forest_feature_selected.score(x_train_new, y_train)
+            print '\nSCORE random forest train data (feature select):---------------------------------------------------'
+            print score
+            # print titanic_panda_inst.compute_score_crossval(forest, x_train_new, y_train)
 
 
         ''' xgboost '''
-         # Grid search xgb
+        # Grid search xgb
         use_xgbRegressor = 0
         if use_xgbRegressor:
             # Is a parallel job
             # xgb_model = xgb.XGBRegressor()
+            xgb_model = xgb.XGBRegressor(n_estimators = 360, max_depth = 2, learning_rate = 0.1)
             # XGBClassifier gives the best prediction
-            xgb_model = xgb.XGBClassifier()
+            # xgb_model = xgb.XGBClassifier()
             cross_validation = StratifiedKFold(shuffle=False, random_state=None)  # , n_folds=10)
             # parameter_grid = {'max_depth': [4, 5, 6, 7, 8], 'n_estimators': [200, 210, 240, 250]}
             parameter_grid = {'max_depth': [2, 4, 6], 'n_estimators': [50, 100, 200]}  #, 'criterion': ['gini', 'entropy']}
@@ -422,13 +531,11 @@ def main():
             print(clf.best_params_)
 
 
-
-
     if is_simple_model or is_make_a_prediction:
         ''' Submission '''
         save_path = '/home/user/Documents/Kaggle/HousePrices/submission/'
         # Submission requires a csv file with Id and SalePrice columns.
-        dfBestScore = pd.read_csv(''.join([save_path, 'submission_house_prices.csv']), header=0)
+        # dfBestScore = pd.read_csv(''.join([save_path, 'submission_house_prices.csv']), header=0)
 
         # We do not expect all to be equal since the learned model differs from time to time.
         # print (dfBestScore.values[0::, 1::].ravel() == output.astype(int))
