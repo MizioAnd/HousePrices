@@ -99,7 +99,7 @@ class HousePrices(object):
 
 
     def feature_mapping_to_numerical_values(self, df):
-        is_one_hot_encoder = 0
+        is_one_hot_encoder = 1
         if is_one_hot_encoder:
             non_numerical_feature_names = self.extract_non_numerical_features(df)._get_axis(1)
             for feature_name in non_numerical_feature_names:
@@ -115,9 +115,9 @@ class HousePrices(object):
                 feature_var_name_addition_list = self.feature_var_names_in_training_set_not_in_test_set(feature_var_names_traning_set, df.columns)
                 for ite in feature_var_name_addition_list:
                     self.add_feature_var_name_with_zeros(df, ite)
-
-        is_label_encoder = 1
-        if is_label_encoder:
+        else:
+        # is_label_encoder = 1
+        # if is_label_encoder:
             non_numerical_feature_names = self.extract_non_numerical_features(df)._get_axis(1)
             for feature_name in non_numerical_feature_names:
                 self.encode_labels_in_numeric_format(df, feature_name)
@@ -127,6 +127,8 @@ class HousePrices(object):
 
     def feature_engineering(self, df):
         # df['LotAreaSquareMeters'] = self.square_feet_to_meters(df.LotArea.values)
+
+        # Transform skewed numerics by taking log1p() which is log(feature + 1).
         if any(df.columns == 'SalePrice'):
             df["SalePrice"] = np.log1p(df["SalePrice"])
 
@@ -144,12 +146,14 @@ class HousePrices(object):
         for feature_name in non_numerical_feature_names:
             df = df.drop([''.join([feature_name, 'Num'])], axis=1)
             df = df.drop([feature_name], axis=1)
+
+        df = df.drop(['Id'], axis=1)
         return df
 
 
     def prepare_data_random_forest(self, df):
         df = df.copy()
-        self.feature_mapping_to_numerical_values(df)
+        # self.feature_mapping_to_numerical_values(df)
         self.feature_engineering(df)
         df = self.clean_data(df)
         # df = self.drop_variable(df)
@@ -198,8 +202,7 @@ def main():
     from sklearn.ensemble import RandomForestClassifier
     from sklearn.ensemble import RandomForestRegressor
     from sklearn.linear_model import SGDRegressor
-    from sklearn.linear_model import Ridge
-    from sklearn.linear_model import Lasso, LassoCV
+    from sklearn.linear_model import Ridge, RidgeCV, Lasso, LassoCV
     # from sklearn.linear_model import LogisticRegression
     from sklearn.feature_selection import SelectFromModel
     # from sklearn.naive_bayes import GaussianNB
@@ -248,12 +251,16 @@ def main():
     is_simple_model = 0
     if is_simple_model:
         df_simple_model = house_prices.clean_data(df_publ)
+        # df_simple_model = house_prices.prepare_data_random_forest(df_publ)
 
         # Prepare simple model
-        # df_simple_model.dropna()
         df_test_simple_model = house_prices.extract_numerical_features(df_test_publ)
-        df_test_simple_model.dropna(axis=1)
-        df_test_simple_model = house_prices.estimate_by_mice(df_test_simple_model)
+        is_remove_null = 0
+        if is_remove_null:
+            df_test_simple_model = df_test_simple_model.dropna(axis=1)
+        else:
+            df_test_simple_model = house_prices.estimate_by_mice(df_test_simple_model)
+
         df_simple_model = df_simple_model[df_test_simple_model.columns.insert(np.shape(df_test_simple_model.columns)[0], 'SalePrice')]
 
 
@@ -403,8 +410,20 @@ def main():
             x_train = train_data[0::, :-1]
             y_train = train_data[0::, -1]
             alphas = [0.05, 0.1, 0.3, 1, 3, 4, 10, 15, 30, 50, 75]
+
+            ridge = RidgeCV(alphas=alphas)
+            ridge.fit(x_train, y_train)
+            alpha = ridge.alpha_
+            print("Best Ridge alpha:", alpha)
+
+            alphas_lasso = [1e-6, 1e-5, 0.00005, 0.0001, 0.0005, 0.001] #, 0.1, 1] #[1, 0.1, 0.001, 0.0005]
+            lasso = LassoCV(alphas=alphas_lasso)
+            lasso.fit(x_train, y_train)
+            alpha = lasso.alpha_
+            print("Best Lasso alpha:", alpha)
+
             cv_ridge = [house_prices.rmse_cv(Ridge(alpha=alpha), x_train, y_train).mean() for alpha in alphas]
-            cv_ridge = pd.Series(cv_ridge, index=alphas)
+            cv_ridge = pd.Series(np.expm1(cv_ridge), index=alphas)
             cv_ridge.plot(title = "Validation")
             plt.xlabel('alpha')
             plt.ylabel('rmse')
@@ -412,9 +431,9 @@ def main():
             print "\nOptimal regularization parameter alpha has rmse = "
             print cv_ridge.min()
 
-            alphas = [0.0005, 0.001, 0.1, 1] #[1, 0.1, 0.001, 0.0005]
-            cv_lasso = [house_prices.rmse_cv(LassoCV(alphas=[alpha]), x_train, y_train).mean() for alpha in alphas]
-            cv_lasso = pd.Series(cv_lasso, index=alphas)
+            # cv_lasso = [house_prices.rmse_cv(LassoCV(alphas=[alpha]), x_train, y_train).mean() for alpha in alphas_lasso]
+            cv_lasso = [house_prices.rmse_cv(Lasso(alpha=alpha), x_train, y_train).mean() for alpha in alphas_lasso]
+            cv_lasso = pd.Series(np.expm1(cv_lasso), index=alphas_lasso)
             cv_lasso.plot(title="Validation")
             plt.xlabel('alpha')
             plt.ylabel('rmse')
@@ -432,7 +451,7 @@ def main():
     if is_make_a_prediction:
         ''' Random Forest '''
         # Fit the training data to the survived labels and create the decision trees
-        x_train = train_data[0::, :-1]
+        X_train = train_data[0::, :-1]
         y_train = train_data[0::, -1]
         # x_train = np.asarray(x_train, dtype=long)
         # y_train = np.asarray(y_train, dtype=long)
@@ -447,14 +466,25 @@ def main():
         # forest = SGDRegressor()
         # forest = Ridge(alpha=1.0)
         # Regularized linear regression is needed to avoid overfitting even if you have lots of features
-        forest = Lasso(alpha=1.0)
+        # lasso = Lasso(alpha=1e-4)
+        lasso = LassoCV(alphas=[0.0001, 0.0003, 0.0006, 0.001, 0.003, 0.006, 0.01, 0.03, 0.06, 0.1,
+                                0.3, 0.6, 1],
+                        max_iter=50000, cv=10)
+        # lasso = RidgeCV(alphas=[0.0001, 0.0003, 0.0006, 0.001, 0.003, 0.006, 0.01, 0.03, 0.06, 0.1,
+        #                         0.3, 0.6, 1], cv=10)
+
+        lasso.fit(X_train, y_train)
+        alpha = lasso.alpha_
+        print('best alpha:', alpha)
+
         # parameter_grid = {'max_depth': [4,5,6,7,8], 'n_estimators': [200,210,240,250]} #,'criterion': ['gini', 'entropy']}
         # cross_validation = StratifiedKFold(random_state=None, shuffle=False)  #, n_folds=10)
         # grid_search = GridSearchCV(forest, param_grid=parameter_grid, cv=cross_validation, n_jobs=24)
-        grid_search = forest
-        grid_search.fit(x_train, y_train)
+        grid_search = lasso
+        # grid_search.fit(X_train, y_train)
         output = grid_search.predict(test_data)
-        score = forest.score(x_train, y_train)
+        score = lasso.score(X_train, y_train)
+
         # print('Best score: {}'.format(grid_search.best_score_))
         # print('Best parameters: {}'.format(grid_search.best_params_))
         print '\nSCORE random forest train (grid search optim) data:---------------------------------------------------'
@@ -512,6 +542,43 @@ def main():
 
 
         ''' xgboost '''
+        is_xgb_simple = 0
+        if is_xgb_simple:
+            SEED = 0
+            dtrain = xgb.DMatrix(x_train, label=y_train)
+            dtest = xgb.DMatrix(test_data)
+
+            xgb_params = {
+                'seed': 0,
+                'colsample_bytree': 0.8,
+                'silent': 1,
+                'subsample': 0.6,
+                'learning_rate': 0.01,
+                'objective': 'reg:linear',
+                'max_depth': 1,
+                'num_parallel_tree': 1,
+                'min_child_weight': 1,
+                'eval_metric': 'rmse',
+            }
+
+            res = xgb.cv(xgb_params, dtrain, num_boost_round=1000, nfold=4, seed=SEED, stratified=False,
+                         early_stopping_rounds=25, verbose_eval=10, show_stdv=True)
+
+            best_nrounds = res.shape[0] - 1
+            cv_mean = res.iloc[-1, 0]
+            cv_std = res.iloc[-1, 1]
+
+            print('Ensemble-CV: {0}+{1}'.format(cv_mean, cv_std))
+
+            gbdt = xgb.train(xgb_params, dtrain, best_nrounds)
+            output = gbdt.predict(dtest)
+            # score = gbdt.score(dtrain)
+            # print '\nSCORE random forest train data (feature select):---------------------------------------------------'
+            # print score
+            # print '\nSCORE XGBRegressor train data:---------------------------------------------------'
+            # print(gbdt.best_score_)
+            # print(gbdt.best_params_)
+
         # Grid search xgb
         use_xgbRegressor = 0
         if use_xgbRegressor:
@@ -531,6 +598,23 @@ def main():
             print(clf.best_params_)
 
 
+        # Early stopping, does not work
+        # x_train_split, x_train_test, y_train_split, y_train_test = train_test_split(x_train, y_train)#, random_state=0)
+        # print np.shape(x_train_split), np.shape(x_train_test), np.shape(y_train_split), np.shape(y_train_test)
+        # Does not work
+        # xgb_model_clf = xgb.XGBClassifier().fit(x_train_split, y_train_split, early_stopping_rounds=10, eval_metric='rmse', eval_set=[(x_train_split, y_train_split), (x_train_test, y_train_test)])
+        # xgb_model_clf = xgb.XGBClassifier().fit(x_train, y_train)
+        # output = xgb_model_clf.predict(test_data)
+        # score = xgb_model_clf.score(x_train, y_train)
+        # print '\nSCORE xgb train data:---------------------------------------------------'
+        # print score
+
+        # output = xgb_model.predict(test_data)
+        # score = xgb_model.score(x_train, y_train)
+        # print '\nSCORE xgb train data:---------------------------------------------------'
+        # print score
+
+
     if is_simple_model or is_make_a_prediction:
         ''' Submission '''
         save_path = '/home/user/Documents/Kaggle/HousePrices/submission/'
@@ -540,6 +624,10 @@ def main():
         # We do not expect all to be equal since the learned model differs from time to time.
         # print (dfBestScore.values[0::, 1::].ravel() == output.astype(int))
         # print np.array_equal(dfBestScore.values[0::, 1::].ravel(), output.astype(int))  # But they are almost never all equal
+
+        # Exp() is needed in order to get the correct sale price, since we took a log() earlier
+        # if not is_simple_model:
+        output = np.expm1(output) # - 1.0
         submission = pd.DataFrame({'Id': Id_df_test, 'SalePrice': output})
         submission.to_csv(''.join([save_path, 'submission_house_prices.csv']), index=False)
 
