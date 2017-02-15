@@ -15,6 +15,8 @@ from sklearn.preprocessing import LabelEncoder
 from sklearn.preprocessing import OneHotEncoder
 from scipy.stats import skew
 from sklearn.model_selection import cross_val_score
+from sklearn.model_selection import KFold, train_test_split
+from sklearn.linear_model import LassoCV
 # import math
 
 class HousePrices(object):
@@ -148,11 +150,11 @@ class HousePrices(object):
 
 
     def drop_variable(self, df):
-        # Drop all categorical feature columns
+        # Drop all categorical feature helping columns ('Num')
         for feature_name in HousePrices.non_numerical_feature_names:
             df = df.drop([''.join([feature_name, 'Num'])], axis=1)
             # df = df.drop([feature_name], axis=1)
-        df = df.drop(['Fireplaces'], axis=1)
+        # df = df.drop(['Fireplaces'], axis=1)
         df = df.drop(['Id'], axis=1)
 
         if not any(df.columns == 'SalePrice'):
@@ -169,7 +171,7 @@ class HousePrices(object):
         self.feature_mapping_to_numerical_values(df)
         self.feature_engineering(df)
         df = self.clean_data(df)
-        # df = self.drop_variable(df)
+        df = self.drop_variable(df)
         # df = self.feature_scaling(df)
         return df
 
@@ -208,6 +210,27 @@ class HousePrices(object):
     def rmse_cv(self, model, x_train, y_train):
         rmse = np.sqrt(-cross_val_score(model, x_train, y_train, scoring='neg_mean_squared_error', cv=5))
         return (rmse)
+
+    def predicted_vs_actual_sale_price(self, X_train, y_train):
+        # Split the training data into an extra set of test
+        X_train_split, X_test_split, y_train_split, y_test_split = train_test_split(X_train, y_train)
+        print np.shape(X_train_split), np.shape(X_test_split), np.shape(y_train_split), np.shape(y_test_split)
+        lasso = LassoCV(alphas=[0.0001, 0.0003, 0.0006, 0.001, 0.003, 0.006, 0.01, 0.03, 0.06, 0.1,
+                                0.3, 0.6, 1],
+                        max_iter=50000, cv=10)
+        # lasso = RidgeCV(alphas=[0.0001, 0.0003, 0.0006, 0.001, 0.003, 0.006, 0.01, 0.03, 0.06, 0.1,
+        #                         0.3, 0.6, 1], cv=10)
+
+        lasso.fit(X_train_split, y_train_split)
+        y_predicted = lasso.predict(X_test_split)
+        plt.figure(figsize=(10, 5))
+        plt.scatter(y_test_split, y_predicted, s=20)
+        plt.title('Predicted vs. Actual')
+        plt.xlabel('Actual Sale Price')
+        plt.ylabel('Predicted Sale Price')
+        plt.plot([min(y_test_split), max(y_test_split)], [min(y_test_split), max(y_test_split)])
+        plt.tight_layout()
+        plt.show()
 
 
 def main():
@@ -511,6 +534,11 @@ def main():
         print '\nSCORE Lasso linear model:---------------------------------------------------'
         print score
 
+        # Make comparison plot using only the train data.
+        # Predicted vs. Actual Sale price
+        house_prices.predicted_vs_actual_sale_price(X_train, y_train)
+
+
         is_grid_search_RF_prediction = 0
         if is_grid_search_RF_prediction:
             # Fit the training data to the survived labels and create the decision trees
@@ -625,7 +653,6 @@ def main():
             print '\nSCORE XGBRegressor train data:---------------------------------------------------'
             print(clf.best_score_)
             print(clf.best_params_)
-
 
 
 
