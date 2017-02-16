@@ -598,32 +598,33 @@ def main():
         lasso = LassoCV(alphas=[0.0001, 0.0003, 0.0006, 0.001, 0.003, 0.006, 0.01, 0.03, 0.06, 0.1,
                                 0.3, 0.6, 1],
                         max_iter=50000, cv=10)
-        ridge = RidgeCV(alphas=[0.0001, 0.0003, 0.0006, 0.001, 0.003, 0.006, 0.01, 0.03, 0.06, 0.1,
-                                0.3, 0.6, 1, 10, 100, 110], cv=10)
 
         # Feature selection with Lasso
+        # Make comparison plot using only the train data.
+        # Predicted vs. Actual Sale price
+        title_name = 'LassoCV'
+        house_prices.predicted_vs_actual_sale_price_input_model(lasso, X_train, y_train, title_name)
+
         lasso.fit(X_train, y_train)
         alpha = lasso.alpha_
         print('best LassoCV alpha:', alpha)
         score = lasso.score(X_train, y_train)
-        # output = lasso.predict(test_data)
+        output_lasso = lasso.predict(test_data)
         print '\nSCORE Lasso linear model:---------------------------------------------------'
         print score
 
-        # Make comparison plot using only the train data.
-        # Predicted vs. Actual Sale price
-        title_name = 'LassoCV'
-        house_prices.predicted_vs_actual_sale_price(X_train, y_train, title_name)
 
         is_ridge_estimator = 1
         if is_ridge_estimator:
             ridge = RidgeCV(alphas=[0.0001, 0.0003, 0.0006, 0.001, 0.003, 0.006, 0.01, 0.03, 0.06, 0.1,
                                     0.3, 0.6, 1, 10, 100, 110], cv=10)
+            title_name = 'RidgeCV'
+            house_prices.predicted_vs_actual_sale_price_input_model(ridge, X_train, y_train, title_name)
             ridge.fit(X_train, y_train)
             alpha = ridge.alpha_
-            print('best LassoCV alpha:', alpha)
+            print('best RidgeCV alpha:', alpha)
             score = ridge.score(X_train, y_train)
-            # output = ridge.predict(test_data)
+            output_ridge = ridge.predict(test_data)
             print '\nSCORE Ridge linear model:---------------------------------------------------'
             print score
 
@@ -647,7 +648,6 @@ def main():
             output_feature_selection_ridge = forest_feature_selection.predict(test_data_new)
             print '\nSCORE {0} regressor (feature select):---------------------------------------------------'.format(add_name_of_regressor)
             print score
-
 
 
         is_grid_search_RF_prediction = 1
@@ -782,7 +782,10 @@ def main():
 
         # Averaging the output using four different machine learning estimators
         # output = (output_feature_selection_lasso + output_feature_selection_ridge + output_xgb_cv + output_xgbRegressor)/4.0
-        output = (output_feature_selection_lasso + output_feature_selection_ridge + output_xgbRegressor) / 3.0
+        output = (output_feature_selection_lasso + output_ridge + output_xgbRegressor) / 3.0
+        # output = (output_feature_selection_lasso + output_ridge) / 2.0
+
+
 
     if is_simple_model or is_make_a_prediction:
         ''' Submission '''
