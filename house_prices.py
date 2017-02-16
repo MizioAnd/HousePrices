@@ -17,6 +17,8 @@ from scipy.stats import skew
 from sklearn.model_selection import cross_val_score
 from sklearn.model_selection import KFold, train_test_split
 from sklearn.linear_model import LassoCV
+from sklearn.ensemble import IsolationForest
+import xgboost as xgb
 # import math
 
 class HousePrices(object):
@@ -134,6 +136,7 @@ class HousePrices(object):
                 # if (feature_name == 'SaleCondition'):
                 #     self.encode_labels_in_numeric_format(df, feature_name)
 
+
     def feature_engineering(self, df):
         # df['LotAreaSquareMeters'] = self.square_feet_to_meters(df.LotArea.values)
 
@@ -147,6 +150,27 @@ class HousePrices(object):
         skewed_feats = skewed_feats[skewed_feats > 0.75]
         skewed_feats = skewed_feats.index
         df[skewed_feats] = np.log1p(df[skewed_feats])
+
+    def outlier_prediction(self, X_train, y_train):
+        # Use built-in isolation forest or use predicted vs. actual
+        # Compute squared residuals of every point
+        # Make a threshold criteria for inclusion
+
+        # The prediction returns 1 if sample point is inlier. If outlier prediction returns -1
+        rng = np.random.RandomState(42)
+        clf_all_features = IsolationForest(max_samples=100, random_state=rng)
+        clf_all_features.fit(X_train)
+
+        # Predict if a particular sample is an outlier using all features for higher dimensional data set.
+        y_pred_train = clf_all_features.predict(X_train)
+
+        # Exclude suggested outlier samples for improvement of prediction power/score
+        outlierMapOut_train = np.array(map(lambda x: x == 1, y_pred_train))
+        X_train_modified = X_train[outlierMapOut_train,]
+        y_train_modified = y_train[outlierMapOut_train,]
+
+        return X_train_modified, y_train_modified
+
 
 
     def drop_variable(self, df):
@@ -171,7 +195,7 @@ class HousePrices(object):
         self.feature_mapping_to_numerical_values(df)
         self.feature_engineering(df)
         df = self.clean_data(df)
-        df = self.drop_variable(df)
+        # df = self.drop_variable(df)
         # df = self.feature_scaling(df)
         return df
 
@@ -211,7 +235,12 @@ class HousePrices(object):
         rmse = np.sqrt(-cross_val_score(model, x_train, y_train, scoring='neg_mean_squared_error', cv=5))
         return (rmse)
 
-    def predicted_vs_actual_sale_price(self, X_train, y_train):
+    def rmse(self, y_pred, y_actual):
+        n_samples = np.shape(y_pred)[0]
+        squared_residuals_summed = 0.5*sum((y_pred - y_actual)**2)
+        return np.sqrt(2.0*squared_residuals_summed/n_samples)
+
+    def predicted_vs_actual_sale_price(self, X_train, y_train, title_name):
         # Split the training data into an extra set of test
         X_train_split, X_test_split, y_train_split, y_test_split = train_test_split(X_train, y_train)
         print np.shape(X_train_split), np.shape(X_test_split), np.shape(y_train_split), np.shape(y_test_split)
@@ -225,12 +254,51 @@ class HousePrices(object):
         y_predicted = lasso.predict(X_test_split)
         plt.figure(figsize=(10, 5))
         plt.scatter(y_test_split, y_predicted, s=20)
-        plt.title('Predicted vs. Actual')
+        rmse_pred_vs_actual = self.rmse(y_predicted, y_test_split)
+        plt.title(''.join([title_name, ', Predicted vs. Actual.', ' rmse = ', str(rmse_pred_vs_actual)]))
         plt.xlabel('Actual Sale Price')
         plt.ylabel('Predicted Sale Price')
         plt.plot([min(y_test_split), max(y_test_split)], [min(y_test_split), max(y_test_split)])
         plt.tight_layout()
-        plt.show()
+
+
+    def predicted_vs_actual_sale_price_input_model(self, model, X_train, y_train, title_name):
+        # Split the training data into an extra set of test
+        X_train_split, X_test_split, y_train_split, y_test_split = train_test_split(X_train, y_train)
+        print np.shape(X_train_split), np.shape(X_test_split), np.shape(y_train_split), np.shape(y_test_split)
+        model.fit(X_train_split, y_train_split)
+        y_predicted = model.predict(X_test_split)
+        plt.figure(figsize=(10, 5))
+        plt.scatter(y_test_split, y_predicted, s=20)
+        rmse_pred_vs_actual = self.rmse(y_predicted, y_test_split)
+        plt.title(''.join([title_name, ', Predicted vs. Actual.', ' rmse = ', str(rmse_pred_vs_actual)]))
+        plt.xlabel('Actual Sale Price')
+        plt.ylabel('Predicted Sale Price')
+        plt.plot([min(y_test_split), max(y_test_split)], [min(y_test_split), max(y_test_split)])
+        plt.tight_layout()
+
+
+    def predicted_vs_actual_sale_price_xgb(self, xgb_params, X_train, y_train, SEED, title_name):
+        # Split the training data into an extra set of test
+        X_train_split, X_test_split, y_train_split, y_test_split = train_test_split(X_train, y_train)
+        dtrain_split = xgb.DMatrix(X_train_split, label=y_train_split)
+        dtest_split = xgb.DMatrix(X_test_split)
+
+        res = xgb.cv(xgb_params, dtrain_split, num_boost_round=1000, nfold=4, seed=SEED, stratified=False,
+                     early_stopping_rounds=25, verbose_eval=10, show_stdv=True)
+
+        best_nrounds = res.shape[0] - 1
+        print np.shape(X_train_split), np.shape(X_test_split), np.shape(y_train_split), np.shape(y_test_split)
+        gbdt = xgb.train(xgb_params, dtrain_split, best_nrounds)
+        y_predicted = gbdt.predict(dtest_split)
+        plt.figure(figsize=(10, 5))
+        plt.scatter(y_test_split, y_predicted, s=20)
+        rmse_pred_vs_actual = self.rmse(y_predicted, y_test_split)
+        plt.title(''.join([title_name, ', Predicted vs. Actual.', ' rmse = ', str(rmse_pred_vs_actual)]))
+        plt.xlabel('Actual Sale Price')
+        plt.ylabel('Predicted Sale Price')
+        plt.plot([min(y_test_split), max(y_test_split)], [min(y_test_split), max(y_test_split)])
+        plt.tight_layout()
 
 
 def main():
@@ -323,7 +391,7 @@ def main():
 
 
     ''' Explore data '''
-    explore_data = 0
+    explore_data = 1
     if explore_data:
 
         is_missing_value_exploration = 0
@@ -410,7 +478,7 @@ def main():
             # plt.show()
             # sns.boxplot(x='SalePrice', y='MSZoning', data=df)
             # plt.show()
-            # sns.boxplot(x='SalePrice', y='Neighborhood', data=df)
+            sns.boxplot(x='SalePrice', y='Neighborhood', data=df)
             # plt.show()
             plt.figure()
             sns.boxplot(x='SalePrice', y='HouseStyle', data=df)
@@ -510,36 +578,38 @@ def main():
         print "\nPrediction Stats:"
         X_train = train_data[0::, :-1]
         y_train = train_data[0::, -1]
+        # Exclude outliers
+        # X_train, y_train = house_prices.outlier_prediction(X_train, y_train)
+
         # x_train = np.asarray(x_train, dtype=long)
         # y_train = np.asarray(y_train, dtype=long)
         # test_data = np.asarray(test_data, dtype=long)
+
+
 
         # Regularized linear regression is needed to avoid overfitting even if you have lots of features
         lasso = LassoCV(alphas=[0.0001, 0.0003, 0.0006, 0.001, 0.003, 0.006, 0.01, 0.03, 0.06, 0.1,
                                 0.3, 0.6, 1],
                         max_iter=50000, cv=10)
         # lasso = RidgeCV(alphas=[0.0001, 0.0003, 0.0006, 0.001, 0.003, 0.006, 0.01, 0.03, 0.06, 0.1,
-        #                         0.3, 0.6, 1], cv=10)
+        #                         0.3, 0.6, 1, 10], cv=10)
 
         # Feature selection with Lasso
         lasso.fit(X_train, y_train)
         alpha = lasso.alpha_
         print('best LassoCV alpha:', alpha)
-        # lasso = SelectFromModel(lasso, threshold=0.25)
-        # print('Lasso features:')
-        # print(lasso.transform(X_train).shape[1])
-
-        output = lasso.predict(test_data)
         score = lasso.score(X_train, y_train)
+        output = lasso.predict(test_data)
         print '\nSCORE Lasso linear model:---------------------------------------------------'
         print score
 
         # Make comparison plot using only the train data.
         # Predicted vs. Actual Sale price
-        house_prices.predicted_vs_actual_sale_price(X_train, y_train)
+        title_name = 'LassoCV'
+        house_prices.predicted_vs_actual_sale_price(X_train, y_train, title_name)
 
 
-        is_grid_search_RF_prediction = 0
+        is_grid_search_RF_prediction = 1
         if is_grid_search_RF_prediction:
             # Fit the training data to the survived labels and create the decision trees
 
@@ -549,6 +619,8 @@ def main():
             parameter_grid = {'max_depth': [4,5,6,7,8], 'n_estimators': [200,210,240,250]} #,'criterion': ['gini', 'entropy']}
             cross_validation = StratifiedKFold(random_state=None, shuffle=False)  #, n_folds=10)
             grid_search = GridSearchCV(forest, param_grid=parameter_grid, cv=cross_validation, n_jobs=24)
+            title_name = 'Random Forest with GridSearchCV'
+            house_prices.predicted_vs_actual_sale_price_input_model(grid_search, X_train, y_train, title_name)
             grid_search.fit(X_train, y_train)
             output = grid_search.predict(test_data)
 
@@ -562,7 +634,9 @@ def main():
             is_feature_selection_with_lasso = 1
             if is_feature_selection_with_lasso:
                 forest_feature_selection = lasso
+                add_name_of_regressor = 'Lasso'
             else:
+                add_name_of_regressor = 'Random Forest'
                 # Random forest (rf) regressor for feature selection
                 forest_feature_selection = RandomForestRegressor(n_estimators=240, max_depth=8)
                 forest_feature_selection = forest_feature_selection.fit(X_train, y_train)
@@ -583,6 +657,8 @@ def main():
                 for f in range(X_train.shape[1]):
                     print '%d. feature %d (%f)' % (f + 1, indices[f], importances[indices[f]])
 
+
+
             # Select most important features
             feature_selection_model = SelectFromModel(forest_feature_selection, prefit=True)
             X_train_new = feature_selection_model.transform(X_train)
@@ -591,10 +667,12 @@ def main():
             print test_data_new.shape
             # We get that 21 features are selected
 
+            title_name = ''.join([add_name_of_regressor, ' Feature Selection'])
+            house_prices.predicted_vs_actual_sale_price_input_model(forest_feature_selection, X_train_new, y_train, title_name)
             forest_feature_selected = forest_feature_selection.fit(X_train_new, y_train)
             score = forest_feature_selected.score(X_train_new, y_train)
-            output = forest_feature_selection.predict(test_data_new)
-            print '\nSCORE random forest regressor (feature select):---------------------------------------------------'
+            # output = forest_feature_selection.predict(test_data_new)
+            print '\nSCORE {0} regressor (feature select):---------------------------------------------------'.format(add_name_of_regressor)
             print score
 
 
@@ -626,7 +704,8 @@ def main():
             cv_std = res.iloc[-1, 1]
 
             print('Ensemble-CV: {0}+{1}'.format(cv_mean, cv_std))
-
+            title_name = 'xgb.cv'
+            house_prices.predicted_vs_actual_sale_price_xgb(xgb_params, X_train, y_train, SEED, title_name)
             gbdt = xgb.train(xgb_params, dtrain, best_nrounds)
             output = gbdt.predict(dtest)
             # score = gbdt.score(dtrain)
@@ -636,23 +715,30 @@ def main():
             # print(gbdt.best_score_)
             # print(gbdt.best_params_)
 
+
         # Grid search xgb
-        use_xgbRegressor = 0
+        use_xgbRegressor = 1
         if use_xgbRegressor:
             # Is a parallel job
-            # xgb_model = xgb.XGBRegressor()
-            xgb_model = xgb.XGBRegressor(n_estimators = 360, max_depth = 2, learning_rate = 0.01)
+            xgb_model = xgb.XGBRegressor()
+            # xgb_model = xgb.XGBRegressor(n_estimators = 360, max_depth = 2, learning_rate = 0.1)
             # XGBClassifier gives the best prediction
             # xgb_model = xgb.XGBClassifier()
-            cross_validation = StratifiedKFold(shuffle=False, random_state=None)  # , n_folds=10)
-            # parameter_grid = {'max_depth': [4, 5, 6, 7, 8], 'n_estimators': [200, 210, 240, 250]}
-            parameter_grid = {'max_depth': [2, 4, 6], 'n_estimators': [50, 100, 200]}  #, 'criterion': ['gini', 'entropy']}
+            cross_validation = StratifiedKFold(n_splits=10, shuffle=False, random_state=None)  # , n_folds=10)
+            parameter_grid = {'max_depth': [4, 5, 6, 7, 8], 'n_estimators': [200, 210, 240, 250]}
+            # parameter_grid = {'max_depth': [2, 4, 6], 'n_estimators': [50, 100, 200]}  #, 'criterion': ['gini', 'entropy']}
             clf = GridSearchCV(xgb_model, param_grid=parameter_grid, cv=cross_validation)  #verbose=1)
-            clf.fit(x_train, y_train)
+            title_name = 'xgbRegressor'
+            house_prices.predicted_vs_actual_sale_price_input_model(clf, X_train, y_train, title_name)
+            clf.fit(X_train, y_train)
             output = clf.predict(test_data)
             print '\nSCORE XGBRegressor train data:---------------------------------------------------'
             print(clf.best_score_)
             print(clf.best_params_)
+
+
+        plt.show()
+
 
 
 
