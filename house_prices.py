@@ -598,8 +598,8 @@ def main():
         lasso = LassoCV(alphas=[0.0001, 0.0003, 0.0006, 0.001, 0.003, 0.006, 0.01, 0.03, 0.06, 0.1,
                                 0.3, 0.6, 1],
                         max_iter=50000, cv=10)
-        # lasso = RidgeCV(alphas=[0.0001, 0.0003, 0.0006, 0.001, 0.003, 0.006, 0.01, 0.03, 0.06, 0.1,
-        #                         0.3, 0.6, 1, 10], cv=10)
+        ridge = RidgeCV(alphas=[0.0001, 0.0003, 0.0006, 0.001, 0.003, 0.006, 0.01, 0.03, 0.06, 0.1,
+                                0.3, 0.6, 1, 10, 100, 110], cv=10)
 
         # Feature selection with Lasso
         lasso.fit(X_train, y_train)
@@ -614,6 +614,40 @@ def main():
         # Predicted vs. Actual Sale price
         title_name = 'LassoCV'
         house_prices.predicted_vs_actual_sale_price(X_train, y_train, title_name)
+
+        is_ridge_estimator = 1
+        if is_ridge_estimator:
+            ridge = RidgeCV(alphas=[0.0001, 0.0003, 0.0006, 0.001, 0.003, 0.006, 0.01, 0.03, 0.06, 0.1,
+                                    0.3, 0.6, 1, 10, 100, 110], cv=10)
+            ridge.fit(X_train, y_train)
+            alpha = ridge.alpha_
+            print('best LassoCV alpha:', alpha)
+            score = ridge.score(X_train, y_train)
+            # output = ridge.predict(test_data)
+            print '\nSCORE Ridge linear model:---------------------------------------------------'
+            print score
+
+            # Make comparison plot using only the train data.
+            # Predicted vs. Actual Sale price
+            add_name_of_regressor = 'RidgeCV'
+            forest_feature_selection = ridge
+
+            # Select most important features
+            feature_selection_model = SelectFromModel(forest_feature_selection, prefit=True)
+            X_train_new = feature_selection_model.transform(X_train)
+            print X_train_new.shape
+            test_data_new = feature_selection_model.transform(test_data)
+            print test_data_new.shape
+            # We get that 21 features are selected
+
+            title_name = ''.join([add_name_of_regressor, ' Feature Selection'])
+            house_prices.predicted_vs_actual_sale_price_input_model(forest_feature_selection, X_train_new, y_train, title_name)
+            forest_feature_selected = forest_feature_selection.fit(X_train_new, y_train)
+            score = forest_feature_selected.score(X_train_new, y_train)
+            output_feature_selection_ridge = forest_feature_selection.predict(test_data_new)
+            print '\nSCORE {0} regressor (feature select):---------------------------------------------------'.format(add_name_of_regressor)
+            print score
+
 
 
         is_grid_search_RF_prediction = 1
@@ -678,14 +712,14 @@ def main():
             house_prices.predicted_vs_actual_sale_price_input_model(forest_feature_selection, X_train_new, y_train, title_name)
             forest_feature_selected = forest_feature_selection.fit(X_train_new, y_train)
             score = forest_feature_selected.score(X_train_new, y_train)
-            output = forest_feature_selection.predict(test_data_new)
+            output_feature_selection_lasso = forest_feature_selection.predict(test_data_new)
             print '\nSCORE {0} regressor (feature select):---------------------------------------------------'.format(add_name_of_regressor)
             print score
 
 
         ''' xgboost '''
-        is_xgb_simple = 0
-        if is_xgb_simple:
+        is_xgb_cv = 1
+        if is_xgb_cv:
             SEED = 0
             dtrain = xgb.DMatrix(x_train, label=y_train)
             dtest = xgb.DMatrix(test_data)
@@ -714,7 +748,7 @@ def main():
             title_name = 'xgb.cv'
             house_prices.predicted_vs_actual_sale_price_xgb(xgb_params, X_train, y_train, SEED, title_name)
             gbdt = xgb.train(xgb_params, dtrain, best_nrounds)
-            # output = gbdt.predict(dtest)
+            output_xgb_cv = gbdt.predict(dtest)
             # score = gbdt.score(dtrain)
             # print '\nSCORE random forest train data (feature select):---------------------------------------------------'
             # print score
@@ -738,7 +772,7 @@ def main():
             title_name = 'xgbRegressor'
             house_prices.predicted_vs_actual_sale_price_input_model(clf, X_train, y_train, title_name)
             clf.fit(X_train, y_train)
-            # output = clf.predict(test_data)
+            output_xgbRegressor = clf.predict(test_data)
             print '\nSCORE XGBRegressor train data:---------------------------------------------------'
             print(clf.best_score_)
             print(clf.best_params_)
@@ -746,8 +780,9 @@ def main():
 
         plt.show()
 
-
-
+        # Averaging the output using four different machine learning estimators
+        # output = (output_feature_selection_lasso + output_feature_selection_ridge + output_xgb_cv + output_xgbRegressor)/4.0
+        output = (output_feature_selection_lasso + output_feature_selection_ridge + output_xgbRegressor) / 3.0
 
     if is_simple_model or is_make_a_prediction:
         ''' Submission '''
