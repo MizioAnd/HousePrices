@@ -19,6 +19,8 @@ from sklearn.model_selection import KFold, train_test_split
 from sklearn.linear_model import LassoCV
 from sklearn.ensemble import IsolationForest
 import xgboost as xgb
+from sklearn.preprocessing import StandardScaler
+
 # import math
 
 class HousePrices(object):
@@ -195,8 +197,8 @@ class HousePrices(object):
         self.feature_mapping_to_numerical_values(df)
         self.feature_engineering(df)
         df = self.clean_data(df)
-        # df = self.drop_variable(df)
-        # df = self.feature_scaling(df)
+        df = self.drop_variable(df)
+        df = self.feature_scaling(df)
         return df
 
 
@@ -221,9 +223,14 @@ class HousePrices(object):
 
     def feature_scaling(self, df):
         df = df.copy()
-        # Scales all features to be values in [0,1]
+        # Standardization (centering and scaling) of dataset that removes mean and scales to unit variance
         numerical_features_names = self.extract_numerical_features(df)._get_axis(1).values
-        df[numerical_features_names] = df[numerical_features_names].apply(lambda x: x/x.max(), axis=0)
+        standard_scaler = StandardScaler()
+        if any(df.columns == 'SalePrice'):
+            y = df.SalePrice.values
+            df[df[numerical_features_names].columns[df[numerical_features_names].columns != 'SalePrice']] = standard_scaler.fit_transform(X=df[df[numerical_features_names].columns[df[numerical_features_names].columns != 'SalePrice']].values, y=y)
+        else:
+            df[numerical_features_names] = standard_scaler.fit_transform(df[numerical_features_names].values)
         return df
 
     def missing_values_in_DataFrame(self, df):
@@ -524,14 +531,14 @@ def main():
             # Choose optimal value for alpha (regularization parameter) in Lasso and Ridge
             x_train = train_data[0::, :-1]
             y_train = train_data[0::, -1]
-            alphas = [0.05, 0.1, 0.3, 1, 3, 4, 10, 15, 30, 50, 75]
+            alphas = [0.05, 0.1, 0.3, 1, 3, 4, 10, 15, 30, 50, 75, 100]
 
             ridge = RidgeCV(alphas=alphas)
             ridge.fit(x_train, y_train)
             alpha = ridge.alpha_
             print("Best Ridge alpha:", alpha)
 
-            alphas_lasso = [1e-6, 1e-5, 0.00005, 0.0001, 0.0005, 0.001] #, 0.1, 1] #[1, 0.1, 0.001, 0.0005]
+            alphas_lasso = [1e-6, 1e-5, 0.00005, 0.0001, 0.0005, 0.001, 0.1, 0.3, 0.6, 1] #[1, 0.1, 0.001, 0.0005]
             lasso = LassoCV(alphas=alphas_lasso)
             lasso.fit(x_train, y_train)
             alpha = lasso.alpha_
@@ -599,7 +606,7 @@ def main():
         alpha = lasso.alpha_
         print('best LassoCV alpha:', alpha)
         score = lasso.score(X_train, y_train)
-        output = lasso.predict(test_data)
+        # output = lasso.predict(test_data)
         print '\nSCORE Lasso linear model:---------------------------------------------------'
         print score
 
@@ -622,7 +629,7 @@ def main():
             title_name = 'Random Forest with GridSearchCV'
             house_prices.predicted_vs_actual_sale_price_input_model(grid_search, X_train, y_train, title_name)
             grid_search.fit(X_train, y_train)
-            output = grid_search.predict(test_data)
+            # output = grid_search.predict(test_data)
 
             print('Best score: {}'.format(grid_search.best_score_))
             print('Best parameters: {}'.format(grid_search.best_params_))
@@ -671,7 +678,7 @@ def main():
             house_prices.predicted_vs_actual_sale_price_input_model(forest_feature_selection, X_train_new, y_train, title_name)
             forest_feature_selected = forest_feature_selection.fit(X_train_new, y_train)
             score = forest_feature_selected.score(X_train_new, y_train)
-            # output = forest_feature_selection.predict(test_data_new)
+            output = forest_feature_selection.predict(test_data_new)
             print '\nSCORE {0} regressor (feature select):---------------------------------------------------'.format(add_name_of_regressor)
             print score
 
@@ -707,7 +714,7 @@ def main():
             title_name = 'xgb.cv'
             house_prices.predicted_vs_actual_sale_price_xgb(xgb_params, X_train, y_train, SEED, title_name)
             gbdt = xgb.train(xgb_params, dtrain, best_nrounds)
-            output = gbdt.predict(dtest)
+            # output = gbdt.predict(dtest)
             # score = gbdt.score(dtrain)
             # print '\nSCORE random forest train data (feature select):---------------------------------------------------'
             # print score
@@ -731,7 +738,7 @@ def main():
             title_name = 'xgbRegressor'
             house_prices.predicted_vs_actual_sale_price_input_model(clf, X_train, y_train, title_name)
             clf.fit(X_train, y_train)
-            output = clf.predict(test_data)
+            # output = clf.predict(test_data)
             print '\nSCORE XGBRegressor train data:---------------------------------------------------'
             print(clf.best_score_)
             print(clf.best_params_)
