@@ -30,9 +30,11 @@ class HousePrices(object):
         self.df_test = HousePrices.df_test
         self.df_all_feature_var_names = []
         self.df_test_all_feature_var_names = []
+        self.timestamp = datetime.datetime.now().strftime('%Y%m%d_%Hh%Mm%Ss')
 
     # Private variables
     non_numerical_feature_names = []
+    is_one_hot_encoder = []
 
     ''' Pandas Data Frame '''
     df = pd.read_csv('/home/user/Documents/Kaggle/HousePrices/train.csv', header=0)
@@ -112,8 +114,8 @@ class HousePrices(object):
 
     def feature_mapping_to_numerical_values(self, df):
 
-        is_one_hot_encoder = 1
-        if is_one_hot_encoder:
+        HousePrices.is_one_hot_encoder = 1
+        if HousePrices.is_one_hot_encoder:
             for feature_name in HousePrices.non_numerical_feature_names:
                 self.encode_labels_in_numeric_format(df, feature_name)
                 self.one_hot_encoder(df, feature_name)
@@ -177,12 +179,18 @@ class HousePrices(object):
 
 
     def drop_variable(self, df):
-        # Drop all categorical feature helping columns ('Num')
-        for feature_name in HousePrices.non_numerical_feature_names:
-            df = df.drop([''.join([feature_name, 'Num'])], axis=1)
-            # df = df.drop([feature_name], axis=1)
+        if HousePrices.is_one_hot_encoder:
+            # Drop all categorical feature helping columns ('Num')
+            for feature_name in HousePrices.non_numerical_feature_names:
+                df = df.drop([''.join([feature_name, 'Num'])], axis=1)
+                # df = df.drop([feature_name], axis=1)
         # df = df.drop(['Fireplaces'], axis=1)
         df = df.drop(['Id'], axis=1)
+        # df = df.drop(["Utilities","LotFrontage","Alley","MasVnrType","MasVnrArea","BsmtQual",
+        #               "BsmtCond","BsmtExposure","BsmtFinType1","BsmtFinType2",
+        #               "Electrical","FireplaceQu","GarageType","GarageYrBlt",
+        #               "GarageFinish","GarageQual","GarageCond","PoolQC",
+        #               "Fence","MiscFeature"], axis=1)
 
         if not any(df.columns == 'SalePrice'):
             # All feature var names occuring in test data is assigned the private public varaible df_test_all_feature_var_names.
@@ -658,7 +666,7 @@ def main():
             print score
 
 
-        is_grid_search_RF_prediction = 1
+        is_grid_search_RF_prediction = 0
         if is_grid_search_RF_prediction:
             # Fit the training data to the survived labels and create the decision trees
 
@@ -726,7 +734,7 @@ def main():
 
 
         ''' xgboost '''
-        is_xgb_cv = 1
+        is_xgb_cv = 0
         if is_xgb_cv:
             SEED = 0
             dtrain = xgb.DMatrix(x_train, label=y_train)
@@ -766,7 +774,7 @@ def main():
 
 
         # Grid search xgb
-        use_xgbRegressor = 1
+        use_xgbRegressor = 0
         if use_xgbRegressor:
             # Is a parallel job
             xgb_model = xgb.XGBRegressor()
@@ -786,14 +794,18 @@ def main():
             print(clf.best_params_)
         save_path = '/home/user/Documents/Kaggle/HousePrices/house_prices_clone_0/predicted_vs_actual/'
 
-        house_prices.multipage(''.join([save_path, 'Overview_estimators_rmse_', str(datetime.datetime.now()), '.pdf']))
+        house_prices.multipage(''.join([save_path, 'Overview_estimators_rmse_', house_prices.timestamp, '.pdf']))
         plt.show()
 
         # Averaging the output using four different machine learning estimators
         # output = (output_feature_selection_lasso + output_feature_selection_ridge + output_xgb_cv + output_xgbRegressor)/4.0
         # output = (output_feature_selection_lasso + output_ridge + output_xgbRegressor) / 3.0
-        # output = (output_feature_selection_lasso + output_ridge) / 2.0
-        output = output_feature_selection_lasso
+        output = (output_feature_selection_lasso + output_ridge) / 2.0
+        # output = output_ridge
+        # print np.shape(output_ridge) == np.shape(output_lasso)
+
+
+
 
 
     if is_simple_model or is_make_a_prediction:
@@ -810,7 +822,7 @@ def main():
         # if not is_simple_model:
         output = np.expm1(output)
         submission = pd.DataFrame({'Id': Id_df_test, 'SalePrice': output})
-        submission.to_csv(''.join([save_path, 'submission_house_prices.csv']), index=False)
+        submission.to_csv(''.join([save_path, 'submission_house_prices_', house_prices.timestamp, '.csv']), index=False)
 
 if __name__ == '__main__':
     main()
