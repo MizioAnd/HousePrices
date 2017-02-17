@@ -256,6 +256,23 @@ class HousePrices(object):
         squared_residuals_summed = 0.5*sum((y_pred - y_actual)**2)
         return np.sqrt(2.0*squared_residuals_summed/n_samples)
 
+    def outlier_identification(self, model, X_train, y_train):
+        # Split the training data into an extra set of test
+        X_train_split, X_test_split, y_train_split, y_test_split = train_test_split(X_train, y_train)
+        print np.shape(X_train_split), np.shape(X_test_split), np.shape(y_train_split), np.shape(y_test_split)
+        model.fit(X_train_split, y_train_split)
+        y_predicted = model.predict(X_test_split)
+        residuals = np.absolute(y_predicted - y_test_split)
+        rmse_pred_vs_actual = self.rmse(y_predicted, y_test_split)
+        outliers_mask = residuals >= rmse_pred_vs_actual
+        outliers_mask = np.insert(np.zeros((np.shape(y_train_split)[0],), dtype=np.int), np.shape(y_train_split)[0], outliers_mask)
+        not_an_outlier = outliers_mask == 0
+        # Resample the training set from split, since the set was randomly split
+        X_out = np.insert(X_train_split, np.shape(X_train_split)[0], X_test_split, axis=0)
+        y_out = np.insert(y_train_split, np.shape(y_train_split)[0], y_test_split, axis=0)
+        return X_out[not_an_outlier,], y_out[not_an_outlier,]
+
+
     def predicted_vs_actual_sale_price(self, X_train, y_train, title_name):
         # Split the training data into an extra set of test
         X_train_split, X_test_split, y_train_split, y_test_split = train_test_split(X_train, y_train)
@@ -414,7 +431,7 @@ def main():
 
 
     ''' Explore data '''
-    explore_data = 1
+    explore_data = 0
     if explore_data:
 
         is_missing_value_exploration = 0
@@ -601,8 +618,6 @@ def main():
         print "\nPrediction Stats:"
         X_train = train_data[0::, :-1]
         y_train = train_data[0::, -1]
-        # Exclude outliers
-        # X_train, y_train = house_prices.outlier_prediction(X_train, y_train)
 
         # x_train = np.asarray(x_train, dtype=long)
         # y_train = np.asarray(y_train, dtype=long)
@@ -614,6 +629,10 @@ def main():
         lasso = LassoCV(alphas=[0.0001, 0.0003, 0.0006, 0.001, 0.003, 0.006, 0.01, 0.03, 0.06, 0.1,
                                 0.3, 0.6, 1],
                         max_iter=50000, cv=10)
+
+        # Exclude outliers
+        # X_train, y_train = house_prices.outlier_prediction(X_train, y_train)
+        X_train, y_train = house_prices.outlier_identification(lasso, X_train, y_train)
 
         # Feature selection with Lasso
         # Make comparison plot using only the train data.
@@ -800,10 +819,9 @@ def main():
         # Averaging the output using four different machine learning estimators
         # output = (output_feature_selection_lasso + output_feature_selection_ridge + output_xgb_cv + output_xgbRegressor)/4.0
         # output = (output_feature_selection_lasso + output_ridge + output_xgbRegressor) / 3.0
-        output = (output_feature_selection_lasso + output_ridge) / 2.0
-        # output = output_ridge
+        # output = (output_feature_selection_lasso + output_ridge) / 2.0
+        output = output_feature_selection_lasso
         # print np.shape(output_ridge) == np.shape(output_lasso)
-
 
 
 
