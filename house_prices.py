@@ -20,7 +20,8 @@ from sklearn.linear_model import LassoCV
 from sklearn.ensemble import IsolationForest
 import xgboost as xgb
 from sklearn.preprocessing import StandardScaler
-
+from matplotlib.backends.backend_pdf import PdfPages
+import datetime
 # import math
 
 class HousePrices(object):
@@ -307,6 +308,13 @@ class HousePrices(object):
         plt.plot([min(y_test_split), max(y_test_split)], [min(y_test_split), max(y_test_split)])
         plt.tight_layout()
 
+    def multipage(self, filename, figs=None, dpi=200):
+        pp = PdfPages(filename)
+        if figs is None:
+            figs = [plt.figure(n) for n in plt.get_fignums()]
+        for fig in figs:
+            fig.savefig(pp, format='pdf')
+        pp.close()
 
 def main():
     import xgboost as xgb
@@ -776,15 +784,16 @@ def main():
             print '\nSCORE XGBRegressor train data:---------------------------------------------------'
             print(clf.best_score_)
             print(clf.best_params_)
+        save_path = '/home/user/Documents/Kaggle/HousePrices/house_prices_clone_0/predicted_vs_actual/'
 
-
+        house_prices.multipage(''.join([save_path, 'Overview_estimators_rmse_', str(datetime.datetime.now()), '.pdf']))
         plt.show()
 
         # Averaging the output using four different machine learning estimators
         # output = (output_feature_selection_lasso + output_feature_selection_ridge + output_xgb_cv + output_xgbRegressor)/4.0
-        output = (output_feature_selection_lasso + output_ridge + output_xgbRegressor) / 3.0
+        # output = (output_feature_selection_lasso + output_ridge + output_xgbRegressor) / 3.0
         # output = (output_feature_selection_lasso + output_ridge) / 2.0
-
+        output = output_feature_selection_lasso
 
 
     if is_simple_model or is_make_a_prediction:
