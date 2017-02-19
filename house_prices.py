@@ -18,10 +18,13 @@ from sklearn.model_selection import cross_val_score
 from sklearn.model_selection import KFold, train_test_split
 from sklearn.linear_model import LassoCV
 from sklearn.ensemble import IsolationForest
+from sklearn.preprocessing import StandardScaler, LabelBinarizer
+from sklearn_pandas import DataFrameMapper
+
 import xgboost as xgb
-from sklearn.preprocessing import StandardScaler
 from matplotlib.backends.backend_pdf import PdfPages
 import datetime
+
 # import math
 
 class HousePrices(object):
@@ -34,6 +37,7 @@ class HousePrices(object):
 
     # Private variables
     non_numerical_feature_names = []
+    numerical_feature_names = []
     is_one_hot_encoder = []
 
     ''' Pandas Data Frame '''
@@ -46,7 +50,24 @@ class HousePrices(object):
 
     def extract_numerical_features(self, df):
         df = df.copy()
-        return df.select_dtypes(include=[np.number])
+        # Todo: improve to take out numerical columns which identifies as object
+        # any(np.number) instead of all np.number
+        # df.dropna(), does not work since columns stays dtype = object
+
+        # make series object
+        # assign true if any element in columns has dtype np.number. No since int == np.number evals to False
+        # Check on type(..) == int, but some will be float
+
+
+        numerical_features = pd.Series(data=False, index=df.columns, dtype=bool)
+
+        for feature in df.columns:
+            if any(df[feature].apply(lambda x: type(x)) == int) or any(df[feature].apply(lambda x: type(x)) == float) & (not any(df[feature].apply(lambda x: type(x)) == str)):
+                numerical_features[feature] = 1
+
+
+        return numerical_features[numerical_features == 1].index
+        # return df.select_dtypes(include=[np.number])
 
     def extract_non_numerical_features(self, df):
         df = df.copy()
@@ -56,19 +77,34 @@ class HousePrices(object):
     def clean_data(self, df):
         df = df.copy()
         # Imputation using MICE
-        numerical_features_names = self.extract_numerical_features(df)._get_axis(1)
-        df[numerical_features_names] = self.estimate_by_mice(df[numerical_features_names])
+        # Todo: extract_numerical_features does not take out all numerical columns, since numerical columns with nan identifies as np.dtype(object)
+        # numerical_features_names = self.extract_numerical_features(df)._get_axis(1)
+        numerical_features_names = self.extract_numerical_features(df)
+        # df[numerical_features_names] = self.estimate_by_mice(df[numerical_features_names])
+        df.loc[:, (numerical_features_names)] = self.estimate_by_mice(df[numerical_features_names])
         return df
 
+
     def encode_labels_in_numeric_format(self, df, estimated_var):
+        # df = df.copy()
         # Transform non-numeric labels into numerical values
         # Cons.: gives additional unwanted structure to data, since some values are high and others low, despite labels where no such comparing measure exists.
         # Alternative: use one-hot-encoding giving all labels their own column represented with only binary values.
-        le = LabelEncoder()
-        le.fit(df[estimated_var].values)
+        # le = LabelEncoder()
+        # le.fit(df[estimated_var].values)
+        # le.fit(df[estimated_var])
         # Check that all values are represented
-        list(le.classes_)
-        df[''.join([estimated_var, 'Num'])] = le.transform(df[estimated_var].values)
+        # list(le.classes_)
+        # df[''.join([estimated_var, 'Num'])] = le.transform(df[estimated_var].values)
+
+        feature_name_num = ''.join([estimated_var, 'Num'])
+        mask = ~df[estimated_var].isnull()
+        df[feature_name_num] = df[estimated_var]
+        df.loc[mask, tuple([feature_name_num])] = df[estimated_var].factorize()[0][mask[mask == 1].index]
+        # df[feature_name_num] = df[estimated_var].factorize()[0]
+
+
+
 
     def label_classes(self, df, estimated_var):
         le = LabelEncoder()
@@ -77,25 +113,41 @@ class HousePrices(object):
 
 
     def one_hot_encoder(self, df, estimated_var):
+        df_class = df.copy()
         ohe = OneHotEncoder()
         # Get every feature_var_name and exclude nan in label_classes
-        label_classes = self.label_classes(df, estimated_var)
-        label_classes = np.asarray(map(lambda x: str(x), label_classes))
+        # label_classes = self.label_classes(df, estimated_var)
+
+
+        label_classes = df_class[estimated_var].factorize()[1]
+        # label_classes = np.asarray(map(lambda x: str(x), label_classes))
+
         # if (estimated_var == 'SaleType') & (not any(df.columns == 'SalePrice')):
         #     print 'hello'
         # if any(label_classes == 'nan'):
         #     print 'debug'
-        label_classes_is_not_nan = label_classes != 'nan'
-        label_classes = label_classes[label_classes_is_not_nan]
-        new_one_hot_encoded_features = map(lambda x: ''.join([estimated_var, '_', str(x)]), label_classes)
 
+        # label_classes_is_not_nan = label_classes != 'nan'
+        # label_classes = label_classes[label_classes_is_not_nan]
+        # new_one_hot_encoded_features = map(lambda x: ''.join([estimated_var, '_', x]), label_classes)
+        new_one_hot_encoded_features = [''.join([estimated_var, '_', x]) for x in label_classes]
         # Create new feature_var columns with one-hot encoded values
-        feature_var_values = ohe.fit_transform(np.reshape(np.array(df[''.join([estimated_var, 'Num'])].values), (df.shape[0], 1))).toarray().astype(int)
+        mask = ~df[estimated_var].isnull()
+        if estimated_var == 'Alley':
+            print('debug')
+        # Todo: implement binarizer
+        feature_var_values = ohe.fit_transform(np.reshape(np.array(df[''.join([estimated_var, 'Num'])][mask].values), (df[mask].shape[0], 1))).toarray().astype(int)
+        # feature_var_values = ohe.fit_transform(np.reshape(np.array(df[''.join([estimated_var, 'Num'])][mask].values), (df[mask].shape[0], 1))).toarray().astype(int)
         column_index = 0
         for ite in new_one_hot_encoded_features:
-            df[ite] = feature_var_values[0::, column_index]
-            column_index += 1
-
+            df[ite] = df[estimated_var]
+            # mask_ite = ~df[ite].isnull()
+            # df.loc[mask, ite] = feature_var_values[0::, column_index]
+            # df.loc[mask, (ite,)] = feature_var_values[0::, column_index]
+            # df.loc[mask, tuple(new_one_hot_encoded_features)] = feature_var_values
+            # column_index += 1
+        df.loc[mask, tuple(new_one_hot_encoded_features)] = feature_var_values
+        # return df
 
     def add_feature_var_name_with_zeros(self, df, feature_var_name):
         df[feature_var_name] = np.zeros((df.shape[0], 1), dtype=int)
@@ -113,12 +165,27 @@ class HousePrices(object):
 
 
     def feature_mapping_to_numerical_values(self, df):
-
+        # df = df.copy()
+        mask = ~df.isnull()
         HousePrices.is_one_hot_encoder = 1
         if HousePrices.is_one_hot_encoder:
             for feature_name in HousePrices.non_numerical_feature_names:
-                self.encode_labels_in_numeric_format(df, feature_name)
-                self.one_hot_encoder(df, feature_name)
+                is_with_label_binarizer = 0
+                if is_with_label_binarizer:
+                    if feature_name == 'MasVnrType':
+                        print('debug')
+                    # feature_var_values = mapper_df.fit_transform(df[feature_name][mask[feature_name]])
+                    mapper_df = DataFrameMapper([(feature_name, LabelBinarizer())], df_out=True)
+                    # Check if we need to merge our result into df
+                    feature_var_values = mapper_df.fit_transform(df.copy())
+                    print(df[feature_name].isnull().sum().sum())
+                    print(df[feature_name][mask[feature_name]].isnull().sum().sum())
+                    for ite in feature_var_values.columns:
+                        df[ite] = feature_var_values[ite]
+                else:
+                    self.encode_labels_in_numeric_format(df, feature_name)
+                    # self.one_hot_encoder(df, feature_name)
+                    self.one_hot_encoder(df, feature_name)
 
             # Assume that training set has all possible feature_var_names
             # Although it may occur in real life that a training set may hold a feature_var_name. But it is probably avoided since such features cannot
@@ -136,21 +203,27 @@ class HousePrices(object):
                 #     self.add_feature_var_name_with_zeros(df, ite)
         else:
             for feature_name in HousePrices.non_numerical_feature_names:
+                # df = self.encode_labels_in_numeric_format(df, feature_name)
                 self.encode_labels_in_numeric_format(df, feature_name)
                 # if (feature_name == 'MSZoning') or (feature_name == 'SaleCondition'):
                 # if (feature_name == 'SaleCondition'):
                 #     self.encode_labels_in_numeric_format(df, feature_name)
-
+        # return df
 
     def feature_engineering(self, df):
         # df['LotAreaSquareMeters'] = self.square_feet_to_meters(df.LotArea.values)
 
         # Transform skewed numerics by taking log1p() which is log(feature + 1).
-        if any(df.columns == 'SalePrice'):
-            df["SalePrice"] = np.log1p(df["SalePrice"])
+        # if any(df.columns == 'SalePrice'):
+        #     df["SalePrice"] = np.log1p(df["SalePrice"])
 
         # log transform skewed numeric features:
-        numeric_feats = df.dtypes[df.dtypes != "object"].index
+        # numeric_feats = df.dtypes[df.dtypes != "object"].index
+
+        # Treat all numerical variables that were not one-hot encoded
+        # Todo: may be correctly identified on float or similar criteria incl. but before imputation
+        # numeric_feats = df[HousePrices.numerical_feature_names].dtypes.index
+        numeric_feats = HousePrices.numerical_feature_names
         skewed_feats = df[numeric_feats].apply(lambda x: skew(x.dropna()))  # compute skewness
         skewed_feats = skewed_feats[skewed_feats > 0.75]
         skewed_feats = skewed_feats.index
@@ -176,7 +249,15 @@ class HousePrices(object):
 
         return X_train_modified, y_train_modified
 
-
+    def drop_variable_before_preparation(self, df):
+        df = df.drop(['Alley'], axis=1)
+        df = df.drop(['MasVnrType'], axis=1)
+        # df = df.drop(["Utilities","LotFrontage","Alley","MasVnrType","MasVnrArea","BsmtQual",
+        #               "BsmtCond","BsmtExposure","BsmtFinType1","BsmtFinType2",
+        #               "Electrical","FireplaceQu","GarageType","GarageYrBlt",
+        #               "GarageFinish","GarageQual","GarageCond","PoolQC",
+        #               "Fence","MiscFeature"], axis=1)
+        return df
 
     def drop_variable(self, df):
         if HousePrices.is_one_hot_encoder:
@@ -186,11 +267,6 @@ class HousePrices(object):
                 # df = df.drop([feature_name], axis=1)
         # df = df.drop(['Fireplaces'], axis=1)
         df = df.drop(['Id'], axis=1)
-        # df = df.drop(["Utilities","LotFrontage","Alley","MasVnrType","MasVnrArea","BsmtQual",
-        #               "BsmtCond","BsmtExposure","BsmtFinType1","BsmtFinType2",
-        #               "Electrical","FireplaceQu","GarageType","GarageYrBlt",
-        #               "GarageFinish","GarageQual","GarageCond","PoolQC",
-        #               "Fence","MiscFeature"], axis=1)
 
         if not any(df.columns == 'SalePrice'):
             # All feature var names occuring in test data is assigned the private public varaible df_test_all_feature_var_names.
@@ -200,12 +276,30 @@ class HousePrices(object):
 
     def prepare_data_random_forest(self, df):
         df = df.copy()
+        # df = self.drop_variable_before_preparation(df)
+
+        # HousePrices.non_numerical_feature_names = self.extract_non_numerical_features(df)._get_axis(1)
+        # HousePrices.numerical_feature_names = self.extract_numerical_features(df)._get_axis(1)
+
+        # Test that non numerical works as well
         HousePrices.non_numerical_feature_names = self.extract_non_numerical_features(df)._get_axis(1)
+        HousePrices.numerical_feature_names = self.extract_numerical_features(df)
+
         # HousePrices.non_numerical_feature_names = ['MSZoning', 'LotShape', 'Neighborhood', 'BldgType', 'HouseStyle', 'Foundation', 'Heating']
 
+        # numerical_features_names = self.extract_numerical_features(df)._get_axis(1)
+        numerical_features_names = self.extract_numerical_features(df)
+        count_null_pre_mice_num = df[numerical_features_names].isnull().sum().sum()
+        count_null_pre_mice = df.isnull().sum().sum()
+        # df = self.feature_mapping_to_numerical_values(df)
         self.feature_mapping_to_numerical_values(df)
+        count_null_pre_mice_num_post_feat = df[numerical_features_names].isnull().sum().sum()
+        count_null_pre_mice_post_feat = df.isnull().sum().sum()
         self.feature_engineering(df)
         df = self.clean_data(df)
+        # self.clean_data(df)
+        count_null_post_mice_num = df[numerical_features_names].isnull().sum().sum()
+        count_null_post_mice = df.isnull().sum().sum()
         df = self.drop_variable(df)
         df = self.feature_scaling(df)
         return df
@@ -225,20 +319,29 @@ class HousePrices(object):
         df_estimated_var = df.copy()
         random.seed(129)
         mice = MICE()  #model=RandomForestClassifier(n_estimators=100))
-        res = mice.complete(df.values)
-        df_estimated_var[df.columns] = res[:][:]
+        res = mice.complete(np.asarray(df.values, dtype=float))
+        # df_estimated_var[df.columns] = res[:][:]
+        df_estimated_var.loc[:, df.columns] = res[:][:]
         return df_estimated_var
 
 
     def feature_scaling(self, df):
         df = df.copy()
         # Standardization (centering and scaling) of dataset that removes mean and scales to unit variance
-        numerical_features_names = self.extract_numerical_features(df)._get_axis(1).values
+        # Todo: change to correct numerical_features_names
+        # numerical_features_names = self.extract_numerical_features(df)._get_axis(1).values
+        numerical_features_names = self.extract_numerical_features(df)
         standard_scaler = StandardScaler()
         if any(df.columns == 'SalePrice'):
             y = df.SalePrice.values
-            df[df[numerical_features_names].columns[df[numerical_features_names].columns != 'SalePrice']] = standard_scaler.fit_transform(X=df[df[numerical_features_names].columns[df[numerical_features_names].columns != 'SalePrice']].values, y=y)
+
+            mask = ~df[df[numerical_features_names].columns[df[numerical_features_names].columns != 'SalePrice']].isnull()
+            # df.loc[mask, df[numerical_features_names].columns[df[numerical_features_names].columns != 'SalePrice']] = \
+            #     standard_scaler.fit_transform(X=df[df[numerical_features_names].columns[df[numerical_features_names].columns != 'SalePrice']][mask].values, y=y)
+            df[df[numerical_features_names].columns[df[numerical_features_names].columns != 'SalePrice']] = standard_scaler.fit_transform(X=df[df[numerical_features_names].columns[df[numerical_features_names].columns != 'SalePrice']][mask].values, y=y)
         else:
+            # mask = ~df[numerical_features_names].isnull()
+            # df.loc[mask, numerical_features_names] = standard_scaler.fit_transform(df[numerical_features_names][mask].values)
             df[numerical_features_names] = standard_scaler.fit_transform(df[numerical_features_names].values)
         return df
 
@@ -259,7 +362,8 @@ class HousePrices(object):
     def outlier_identification(self, model, X_train, y_train):
         # Split the training data into an extra set of test
         X_train_split, X_test_split, y_train_split, y_test_split = train_test_split(X_train, y_train)
-        print np.shape(X_train_split), np.shape(X_test_split), np.shape(y_train_split), np.shape(y_test_split)
+        print('\nOutlier shapes')
+        print(np.shape(X_train_split), np.shape(X_test_split), np.shape(y_train_split), np.shape(y_test_split))
         model.fit(X_train_split, y_train_split)
         y_predicted = model.predict(X_test_split)
         residuals = np.absolute(y_predicted - y_test_split)
@@ -276,7 +380,7 @@ class HousePrices(object):
     def predicted_vs_actual_sale_price(self, X_train, y_train, title_name):
         # Split the training data into an extra set of test
         X_train_split, X_test_split, y_train_split, y_test_split = train_test_split(X_train, y_train)
-        print np.shape(X_train_split), np.shape(X_test_split), np.shape(y_train_split), np.shape(y_test_split)
+        print(np.shape(X_train_split), np.shape(X_test_split), np.shape(y_train_split), np.shape(y_test_split))
         lasso = LassoCV(alphas=[0.0001, 0.0003, 0.0006, 0.001, 0.003, 0.006, 0.01, 0.03, 0.06, 0.1,
                                 0.3, 0.6, 1],
                         max_iter=50000, cv=10)
@@ -298,7 +402,7 @@ class HousePrices(object):
     def predicted_vs_actual_sale_price_input_model(self, model, X_train, y_train, title_name):
         # Split the training data into an extra set of test
         X_train_split, X_test_split, y_train_split, y_test_split = train_test_split(X_train, y_train)
-        print np.shape(X_train_split), np.shape(X_test_split), np.shape(y_train_split), np.shape(y_test_split)
+        print(np.shape(X_train_split), np.shape(X_test_split), np.shape(y_train_split), np.shape(y_test_split))
         model.fit(X_train_split, y_train_split)
         y_predicted = model.predict(X_test_split)
         plt.figure(figsize=(10, 5))
@@ -321,7 +425,7 @@ class HousePrices(object):
                      early_stopping_rounds=25, verbose_eval=10, show_stdv=True)
 
         best_nrounds = res.shape[0] - 1
-        print np.shape(X_train_split), np.shape(X_test_split), np.shape(y_train_split), np.shape(y_test_split)
+        print(np.shape(X_train_split), np.shape(X_test_split), np.shape(y_train_split), np.shape(y_test_split))
         gbdt = xgb.train(xgb_params, dtrain_split, best_nrounds)
         y_predicted = gbdt.predict(dtest_split)
         plt.figure(figsize=(10, 5))
@@ -367,21 +471,21 @@ def main():
 
     df = house_prices.prepare_data_random_forest(df_publ)
     house_prices.df_all_feature_var_names = df[df.columns[df.columns != 'SalePrice']].columns
-    print '\n TRAINING DATA:----------------------------------------------- \n'
-    print df.head(3)
-    print '\n'
-    print df.info()
-    print '\n'
-    print df.describe()
+    print('\n TRAINING DATA:----------------------------------------------- \n')
+    print(df.head(3))
+    print('\n')
+    print(df.info())
+    print('\n')
+    print(df.describe())
 
     # Test data
     Id_df_test = house_prices.df_test['Id']  # Submission column
     df_test = house_prices.prepare_data_random_forest(df_test_publ)
-    print '\n TEST DATA:----------------------------------------------- \n'
-    print df_test.info()
-    print '\n'
-    print df_test.describe()
-    print '\n'
+    print('\n TEST DATA:----------------------------------------------- \n')
+    print(df_test.info())
+    print('\n')
+    print(df_test.describe())
+    print('\n')
 
     # Check if feature_var_names of test exist that do not appear in training set
     feature_var_names_addition_to_training_set = house_prices.feature_var_names_in_training_set_not_in_test_set(df_test.columns, df.columns)
@@ -391,9 +495,13 @@ def main():
     # Drop the zero feature var name columns that was inserted into test data, since the names only occured in the training data.
     df = df[house_prices.df_test_all_feature_var_names.insert(np.shape(house_prices.df_test_all_feature_var_names)[0], 'SalePrice')]
     df_test = df_test[house_prices.df_test_all_feature_var_names]
-    train_data = house_prices.extract_numerical_features(df).values
-    test_data = house_prices.extract_numerical_features(df_test).values
-
+    # df_test_numerical_features = house_prices.extract_numerical_features(df_test)
+    # train_data = df[df_test_numerical_features].values
+    # test_data = df_test[df_test_numerical_features].values
+    # house_prices.extract_numerical_features(df_test).columns == house_prices.extract_numerical_features(df).columns[:house_prices.extract_numerical_features(df_test).columns.shape[0]]
+    train_data = df[house_prices.extract_numerical_features(df)].values
+    test_data = df_test[house_prices.extract_numerical_features(df_test)].values
+    # print(sum(np.isnan(train_data)).sum()) # 348 is nan
 
     is_simple_model = 0
     if is_simple_model:
@@ -431,40 +539,41 @@ def main():
 
 
     ''' Explore data '''
-    explore_data = 0
+    explore_data = 1
     if explore_data:
 
-        is_missing_value_exploration = 0
+        is_missing_value_exploration = 1
         if is_missing_value_exploration:
             # Imputation for the 11 columns with none or nan values in the test data.
             # Using only numerical feature columns as first approach.
-            # Print numeric feature columns with none or nan in test data
-            print '\nColumns in train data with none/nan values:\n'
+
+            # Train Data: numeric feature columns with none or nan in test data
+            print('\nColumns in train data with none/nan values:\n')
             print('\nTraining set numerical features\' missing values')
             df_publ_numerical_features = house_prices.extract_numerical_features(df_publ)
-            house_prices.missing_values_in_DataFrame(df_publ_numerical_features)
+            house_prices.missing_values_in_DataFrame(df_publ[df_publ_numerical_features])
 
-            # Print numeric feature columns with none/nan in test data
-            print '\nColumns in test data with none/nan values:\n'
+            # Test Data: Print numeric feature columns with none/nan in test data
+            print('\nColumns in test data with none/nan values:\n')
             print('\nTest set numerical features\' missing values')
             df_test_publ_numerical_features = house_prices.extract_numerical_features(df_test_publ)
-            house_prices.missing_values_in_DataFrame(df_test_publ_numerical_features)
+            house_prices.missing_values_in_DataFrame(df_test_publ[df_test_publ_numerical_features])
 
             # Imputation method applied to numeric columns in test data with none/nan values
-            print("Training set missing values after imputation")
-            df_imputed = house_prices.estimate_by_mice(df_publ_numerical_features)
-            house_prices.missing_values_in_DataFrame(df_imputed)
-            print("Testing set missing values after imputation")
-            df_test_imputed = house_prices.estimate_by_mice(df_test_publ_numerical_features)
-            house_prices.missing_values_in_DataFrame(df_test_imputed)
+            # print("Training set missing values after imputation")
+            # df_imputed = house_prices.estimate_by_mice(df_publ_numerical_features)
+            # house_prices.missing_values_in_DataFrame(df_imputed)
+            # print("Testing set missing values after imputation")
+            # df_test_imputed = house_prices.estimate_by_mice(df_test_publ_numerical_features)
+            # house_prices.missing_values_in_DataFrame(df_test_imputed)
 
             print('\nTotal Records for values: {}\n'.format(house_prices.df.count().sum() + house_prices.df_test.count().sum()))
             print('Total Records for missing values: {}\n'.format(house_prices.df.isnull().sum().sum() + house_prices.df_test.isnull().sum().sum()))
 
-            print('Training set missing values')
+            print('All Training set missing values')
             house_prices.missing_values_in_DataFrame(house_prices.df)
 
-            print('Test set missing values')
+            print('All Test set missing values')
             house_prices.missing_values_in_DataFrame(house_prices.df_test)
 
             print("\n=== AFTER IMPUTERS ===\n")
@@ -473,19 +582,28 @@ def main():
             print('\nTotal Records for values: {}\n'.format(df.count().sum() + df_test.count().sum()))
             print('Total Records for missing values: {}\n'.format(df.isnull().sum().sum() + df_test.isnull().sum().sum()))
 
-            # Overview of missing values in non numerical features
-            print("Training set missing values")
+            print('All Training set missing values')
             house_prices.missing_values_in_DataFrame(df)
-            print("Testing set missing values")
+
+            print('All Test set missing values')
             house_prices.missing_values_in_DataFrame(df_test)
 
-            print("Training set with all non numerical features without missing values\n")
-            df_all_non_numerical_features = house_prices.extract_non_numerical_features(df_publ)
-            print df_all_non_numerical_features.count()
+            # Overview of missing values in non numerical features
+            # print("Training set numerical features\' missing values")
+            # house_prices.missing_values_in_DataFrame(df[house_prices.extract_numerical_features(df)])
+            # print("Testing set numerical features\' missing values")
+            # house_prices.missing_values_in_DataFrame(df_test[house_prices.extract_numerical_features(df_test)])
+
+            # print("Training set with all non numerical features without missing values\n")
+            # df_all_non_numerical_features = house_prices.extract_non_numerical_features(df_publ)
+            # print(df_all_non_numerical_features.count())
+
             # house_prices.missing_values_in_DataFrame(df)
-            print("\nTesting set with all non numerical features without missing values\n")
-            df_test_all_non_numerical_features = house_prices.extract_non_numerical_features(df_test_publ)
-            print df_test_all_non_numerical_features.count()
+
+            # print("\nTesting set with all non numerical features without missing values\n")
+            # df_test_all_non_numerical_features = house_prices.extract_non_numerical_features(df_test_publ)
+            # print(df_test_all_non_numerical_features.count())
+
             # house_prices.missing_values_in_DataFrame(df_test)
 
 
@@ -493,11 +611,11 @@ def main():
 
             # SalePrice square meter plot
             # Overview of data with histograms
-            feature_to_plot = ['LotAreaSquareMeters', 'LotFrontage', 'MasVnrArea', 'GarageYrBlt']
+            # feature_to_plot = ['LotAreaSquareMeters', 'LotFrontage', 'MasVnrArea', 'GarageYrBlt']
             # feature_to_plot = ['YearBuilt', 'SalePrice', 'LotAreaSquareMeters', 'OverallCond', 'TotalBsmtSF']
-            df_imputed_prepared = df_imputed.copy()
-            house_prices.feature_engineering(df_imputed_prepared)
-            bin_number = 25
+            # df_imputed_prepared = df_imputed.copy()
+            # house_prices.feature_engineering(df_imputed_prepared)
+            # bin_number = 25
             # df[df.LotAreaSquareMeters <= 2500.0][feature_to_plot].hist(bins=bin_number, alpha=.5)
             # df_imputed_prepared[df_imputed_prepared.LotAreaSquareMeters <= 2500.0][feature_to_plot].hist(bins=bin_number, alpha=.5)
 
@@ -518,7 +636,11 @@ def main():
             # plt.show()
             # sns.boxplot(x='SalePrice', y='MSZoning', data=df)
             # plt.show()
+            plt.figure()
             sns.boxplot(x='SalePrice', y='Neighborhood', data=df)
+            plt.figure()
+            # Todo: plot square meter vs. sale price
+            sns.boxplot(x='SalePrice', y='GrLivArea', data=df)
             # plt.show()
             plt.figure()
             sns.boxplot(x='SalePrice', y='HouseStyle', data=df)
@@ -559,7 +681,7 @@ def main():
 
 
 
-        is_choose_optimal_regularization_param = 1
+        is_choose_optimal_regularization_param = 0
         if is_choose_optimal_regularization_param:
             # Choose optimal value for alpha (regularization parameter) in Lasso and Ridge
             x_train = train_data[0::, :-1]
@@ -584,8 +706,8 @@ def main():
             # cv_ridge.plot(title = "Ridge, Validation")
             # plt.xlabel('alpha')
             # plt.ylabel('rmse')
-            print "\nRidge optimal regularization parameter alpha has rmse = "
-            print cv_ridge.min()
+            print("\nRidge optimal regularization parameter alpha has rmse = ")
+            print(cv_ridge.min())
 
             # cv_lasso = [house_prices.rmse_cv(LassoCV(alphas=[alpha]), x_train, y_train).mean() for alpha in alphas_lasso]
             cv_lasso = [house_prices.rmse_cv(Lasso(alpha=alpha), x_train, y_train).mean() for alpha in alphas_lasso]
@@ -595,15 +717,15 @@ def main():
             cv_lasso.plot(title="Lasso, Validation")
             plt.xlabel('alpha')
             plt.ylabel('rmse')
-            print "\nLasso optimal regularization parameter alpha has rmse = "
-            print cv_lasso.min()
+            print("\nLasso optimal regularization parameter alpha has rmse = ")
+            print(cv_lasso.min())
 
-            print "\nMean lasso rmse:"
+            print("\nMean lasso rmse:")
             model_lasso = LassoCV(alphas=alphas_lasso).fit(x_train, y_train)
-            print house_prices.rmse_cv(model_lasso, x_train, y_train).mean()
-            print "\nbest lasso alpha:", model_lasso.alpha_
+            print(house_prices.rmse_cv(model_lasso, x_train, y_train).mean())
+            print("\nbest lasso alpha:", model_lasso.alpha_)
 
-            coefficient_lasso = pd.Series(model_lasso.coef_, index=house_prices.extract_numerical_features(df[df.columns[df.columns != 'SalePrice']]).columns).sort_values()
+            coefficient_lasso = pd.Series(model_lasso.coef_, index=house_prices.extract_numerical_features(df[df.columns[df.columns != 'SalePrice']])).sort_values()
             importance_coeff = pd.concat([coefficient_lasso.head(10), coefficient_lasso.tail(10)])
             plt.figure()
             importance_coeff.plot(kind='barh')
@@ -615,9 +737,14 @@ def main():
     is_make_a_prediction = 1
     if is_make_a_prediction:
         ''' Random Forest '''
-        print "\nPrediction Stats:"
+        print("\nPrediction Stats:")
         X_train = train_data[0::, :-1]
         y_train = train_data[0::, -1]
+        print('\nShapes train data')
+        print(np.shape(X_train), np.shape(y_train))
+        print('\nShapes test data')
+        print(np.shape(test_data))
+
 
         # x_train = np.asarray(x_train, dtype=long)
         # y_train = np.asarray(y_train, dtype=long)
@@ -629,24 +756,30 @@ def main():
         lasso = LassoCV(alphas=[0.0001, 0.0003, 0.0006, 0.001, 0.003, 0.006, 0.01, 0.03, 0.06, 0.1,
                                 0.3, 0.6, 1],
                         max_iter=50000, cv=10)
+        # Todo: make a copy of lasso object
+        # lasso_copy = lasso
+        # lasso_copied = LassoCV(alphas=[0.0001, 0.0003, 0.0006, 0.001, 0.003, 0.006, 0.01, 0.03, 0.06, 0.1,
+        #                        0.3, 0.6, 1],
+        #                        max_iter=50000, cv=10)
 
         # Exclude outliers
-        # X_train, y_train = house_prices.outlier_prediction(X_train, y_train)
         X_train, y_train = house_prices.outlier_identification(lasso, X_train, y_train)
+        print('\nShape after outlier detection')
+        print(np.shape(X_train), np.shape(y_train))
 
         # Feature selection with Lasso
         # Make comparison plot using only the train data.
         # Predicted vs. Actual Sale price
         title_name = 'LassoCV'
         house_prices.predicted_vs_actual_sale_price_input_model(lasso, X_train, y_train, title_name)
-
+        # plt.show()
         lasso.fit(X_train, y_train)
         alpha = lasso.alpha_
         print('best LassoCV alpha:', alpha)
         score = lasso.score(X_train, y_train)
         output_lasso = lasso.predict(test_data)
-        print '\nSCORE Lasso linear model:---------------------------------------------------'
-        print score
+        print('\nSCORE Lasso linear model:---------------------------------------------------')
+        print(score)
 
 
         is_ridge_estimator = 1
@@ -660,8 +793,8 @@ def main():
             print('best RidgeCV alpha:', alpha)
             score = ridge.score(X_train, y_train)
             output_ridge = ridge.predict(test_data)
-            print '\nSCORE Ridge linear model:---------------------------------------------------'
-            print score
+            print('\nSCORE Ridge linear model:---------------------------------------------------')
+            print(score)
 
             # Make comparison plot using only the train data.
             # Predicted vs. Actual Sale price
@@ -671,9 +804,9 @@ def main():
             # Select most important features
             feature_selection_model = SelectFromModel(forest_feature_selection, prefit=True)
             X_train_new = feature_selection_model.transform(X_train)
-            print X_train_new.shape
+            print(X_train_new.shape)
             test_data_new = feature_selection_model.transform(test_data)
-            print test_data_new.shape
+            print(test_data_new.shape)
             # We get that 21 features are selected
 
             title_name = ''.join([add_name_of_regressor, ' Feature Selection'])
@@ -681,8 +814,8 @@ def main():
             forest_feature_selected = forest_feature_selection.fit(X_train_new, y_train)
             score = forest_feature_selected.score(X_train_new, y_train)
             output_feature_selection_ridge = forest_feature_selection.predict(test_data_new)
-            print '\nSCORE {0} regressor (feature select):---------------------------------------------------'.format(add_name_of_regressor)
-            print score
+            print('\nSCORE {0} regressor (feature select):---------------------------------------------------'.format(add_name_of_regressor))
+            print(score)
 
 
         is_grid_search_RF_prediction = 0
@@ -722,25 +855,25 @@ def main():
                 std = np.std([tree.feature_importances_ for tree in forest_feature_selection.estimators_], axis=0)
                 indices = np.argsort(importances)[::-1]
 
-                print '\nFeatures:'
+                print('\nFeatures:')
                 df_test_num_features = house_prices.extract_numerical_features(df_test)
-                print np.reshape(
-                    np.append(np.array(list(df_test_num_features)), np.arange(0, len(list(df_test_num_features)))),
-                    (len(list(df_test_num_features)), 2),
-                    'F')  # , 2, len(list(df_test)))
+                print(np.reshape(
+                      np.append(np.array(list(df_test_num_features)), np.arange(0, len(list(df_test_num_features)))),
+                      (len(list(df_test_num_features)), 2),
+                      'F'))  # , 2, len(list(df_test)))
 
-                print '\nFeature ranking:'
+                print('\nFeature ranking:')
                 for f in range(X_train.shape[1]):
-                    print '%d. feature %d (%f)' % (f + 1, indices[f], importances[indices[f]])
+                    print('%d. feature %d (%f)' % (f + 1, indices[f], importances[indices[f]]))
 
 
 
             # Select most important features
             feature_selection_model = SelectFromModel(forest_feature_selection, prefit=True)
             X_train_new = feature_selection_model.transform(X_train)
-            print X_train_new.shape
+            print(X_train_new.shape)
             test_data_new = feature_selection_model.transform(test_data)
-            print test_data_new.shape
+            print(test_data_new.shape)
             # We get that 21 features are selected
 
             title_name = ''.join([add_name_of_regressor, ' Feature Selection'])
@@ -748,8 +881,8 @@ def main():
             forest_feature_selected = forest_feature_selection.fit(X_train_new, y_train)
             score = forest_feature_selected.score(X_train_new, y_train)
             output_feature_selection_lasso = forest_feature_selection.predict(test_data_new)
-            print '\nSCORE {0} regressor (feature select):---------------------------------------------------'.format(add_name_of_regressor)
-            print score
+            print('\nSCORE {0} regressor (feature select):---------------------------------------------------'.format(add_name_of_regressor))
+            print(score)
 
 
         ''' xgboost '''
@@ -808,7 +941,7 @@ def main():
             house_prices.predicted_vs_actual_sale_price_input_model(clf, X_train, y_train, title_name)
             clf.fit(X_train, y_train)
             output_xgbRegressor = clf.predict(test_data)
-            print '\nSCORE XGBRegressor train data:---------------------------------------------------'
+            print('\nSCORE XGBRegressor train data:---------------------------------------------------')
             print(clf.best_score_)
             print(clf.best_params_)
         save_path = '/home/user/Documents/Kaggle/HousePrices/house_prices_clone_0/predicted_vs_actual/'
