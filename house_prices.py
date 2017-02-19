@@ -50,24 +50,14 @@ class HousePrices(object):
 
     def extract_numerical_features(self, df):
         df = df.copy()
-        # Todo: improve to take out numerical columns which identifies as object
-        # any(np.number) instead of all np.number
-        # df.dropna(), does not work since columns stays dtype = object
-
-        # make series object
-        # assign true if any element in columns has dtype np.number. No since int == np.number evals to False
-        # Check on type(..) == int, but some will be float
-
-
+        # Identify numerical columns which are of type object
         numerical_features = pd.Series(data=False, index=df.columns, dtype=bool)
 
         for feature in df.columns:
             if any(df[feature].apply(lambda x: type(x)) == int) or any(df[feature].apply(lambda x: type(x)) == float) & (not any(df[feature].apply(lambda x: type(x)) == str)):
                 numerical_features[feature] = 1
-
-
         return numerical_features[numerical_features == 1].index
-        # return df.select_dtypes(include=[np.number])
+
 
     def extract_non_numerical_features(self, df):
         df = df.copy()
@@ -77,33 +67,19 @@ class HousePrices(object):
     def clean_data(self, df):
         df = df.copy()
         # Imputation using MICE
-        # Todo: extract_numerical_features does not take out all numerical columns, since numerical columns with nan identifies as np.dtype(object)
-        # numerical_features_names = self.extract_numerical_features(df)._get_axis(1)
         numerical_features_names = self.extract_numerical_features(df)
-        # df[numerical_features_names] = self.estimate_by_mice(df[numerical_features_names])
         df.loc[:, (numerical_features_names)] = self.estimate_by_mice(df[numerical_features_names])
         return df
 
 
     def encode_labels_in_numeric_format(self, df, estimated_var):
-        # df = df.copy()
         # Transform non-numeric labels into numerical values
         # Cons.: gives additional unwanted structure to data, since some values are high and others low, despite labels where no such comparing measure exists.
         # Alternative: use one-hot-encoding giving all labels their own column represented with only binary values.
-        # le = LabelEncoder()
-        # le.fit(df[estimated_var].values)
-        # le.fit(df[estimated_var])
-        # Check that all values are represented
-        # list(le.classes_)
-        # df[''.join([estimated_var, 'Num'])] = le.transform(df[estimated_var].values)
-
         feature_name_num = ''.join([estimated_var, 'Num'])
         mask = ~df[estimated_var].isnull()
         df[feature_name_num] = df[estimated_var]
         df.loc[mask, tuple([feature_name_num])] = df[estimated_var].factorize()[0][mask[mask == 1].index]
-        # df[feature_name_num] = df[estimated_var].factorize()[0]
-
-
 
 
     def label_classes(self, df, estimated_var):
@@ -115,39 +91,15 @@ class HousePrices(object):
     def one_hot_encoder(self, df, estimated_var):
         df_class = df.copy()
         ohe = OneHotEncoder()
-        # Get every feature_var_name and exclude nan in label_classes
-        # label_classes = self.label_classes(df, estimated_var)
-
-
         label_classes = df_class[estimated_var].factorize()[1]
-        # label_classes = np.asarray(map(lambda x: str(x), label_classes))
-
-        # if (estimated_var == 'SaleType') & (not any(df.columns == 'SalePrice')):
-        #     print 'hello'
-        # if any(label_classes == 'nan'):
-        #     print 'debug'
-
-        # label_classes_is_not_nan = label_classes != 'nan'
-        # label_classes = label_classes[label_classes_is_not_nan]
-        # new_one_hot_encoded_features = map(lambda x: ''.join([estimated_var, '_', x]), label_classes)
         new_one_hot_encoded_features = [''.join([estimated_var, '_', x]) for x in label_classes]
-        # Create new feature_var columns with one-hot encoded values
         mask = ~df[estimated_var].isnull()
-        if estimated_var == 'Alley':
-            print('debug')
-        # Todo: implement binarizer
         feature_var_values = ohe.fit_transform(np.reshape(np.array(df[''.join([estimated_var, 'Num'])][mask].values), (df[mask].shape[0], 1))).toarray().astype(int)
-        # feature_var_values = ohe.fit_transform(np.reshape(np.array(df[''.join([estimated_var, 'Num'])][mask].values), (df[mask].shape[0], 1))).toarray().astype(int)
-        column_index = 0
+        # Create new feature_var columns with one-hot encoded values
         for ite in new_one_hot_encoded_features:
             df[ite] = df[estimated_var]
-            # mask_ite = ~df[ite].isnull()
-            # df.loc[mask, ite] = feature_var_values[0::, column_index]
-            # df.loc[mask, (ite,)] = feature_var_values[0::, column_index]
-            # df.loc[mask, tuple(new_one_hot_encoded_features)] = feature_var_values
-            # column_index += 1
         df.loc[mask, tuple(new_one_hot_encoded_features)] = feature_var_values
-        # return df
+
 
     def add_feature_var_name_with_zeros(self, df, feature_var_name):
         df[feature_var_name] = np.zeros((df.shape[0], 1), dtype=int)
@@ -162,10 +114,7 @@ class HousePrices(object):
         return np.array(feature_var_name_addition_list)
 
 
-
-
     def feature_mapping_to_numerical_values(self, df):
-        # df = df.copy()
         mask = ~df.isnull()
         HousePrices.is_one_hot_encoder = 1
         if HousePrices.is_one_hot_encoder:
@@ -184,7 +133,6 @@ class HousePrices(object):
                         df[ite] = feature_var_values[ite]
                 else:
                     self.encode_labels_in_numeric_format(df, feature_name)
-                    # self.one_hot_encoder(df, feature_name)
                     self.one_hot_encoder(df, feature_name)
 
             # Assume that training set has all possible feature_var_names
@@ -193,41 +141,23 @@ class HousePrices(object):
             # Add missing feature_var_names of traning set not occuring in test set. Add these with zeros in columns.
 
             if not any(df.columns == 'SalePrice'):
-                # All feature var names occuring in test data is assigned the private public varaible df_test_all_feature_var_names.
+                # All one-hot encoded feature var names occuring in test data is assigned the private public varaible df_test_all_feature_var_names.
                 self.df_test_all_feature_var_names = df.columns
-
-                # If we want to add feature var names not occuring in test set
-                feature_var_names_traning_set = self.df_all_feature_var_names
-                # feature_var_name_addition_list = self.feature_var_names_in_training_set_not_in_test_set(feature_var_names_traning_set, df.columns)
-                # for ite in feature_var_name_addition_list:
-                #     self.add_feature_var_name_with_zeros(df, ite)
         else:
             for feature_name in HousePrices.non_numerical_feature_names:
-                # df = self.encode_labels_in_numeric_format(df, feature_name)
                 self.encode_labels_in_numeric_format(df, feature_name)
-                # if (feature_name == 'MSZoning') or (feature_name == 'SaleCondition'):
-                # if (feature_name == 'SaleCondition'):
-                #     self.encode_labels_in_numeric_format(df, feature_name)
-        # return df
+
 
     def feature_engineering(self, df):
         # df['LotAreaSquareMeters'] = self.square_feet_to_meters(df.LotArea.values)
 
-        # Transform skewed numerics by taking log1p() which is log(feature + 1).
-        # if any(df.columns == 'SalePrice'):
-        #     df["SalePrice"] = np.log1p(df["SalePrice"])
-
-        # log transform skewed numeric features:
-        # numeric_feats = df.dtypes[df.dtypes != "object"].index
-
         # Treat all numerical variables that were not one-hot encoded
-        # Todo: may be correctly identified on float or similar criteria incl. but before imputation
-        # numeric_feats = df[HousePrices.numerical_feature_names].dtypes.index
         numeric_feats = HousePrices.numerical_feature_names
         skewed_feats = df[numeric_feats].apply(lambda x: skew(x.dropna()))  # compute skewness
         skewed_feats = skewed_feats[skewed_feats > 0.75]
         skewed_feats = skewed_feats.index
         df[skewed_feats] = np.log1p(df[skewed_feats])
+
 
     def outlier_prediction(self, X_train, y_train):
         # Use built-in isolation forest or use predicted vs. actual
@@ -249,6 +179,7 @@ class HousePrices(object):
 
         return X_train_modified, y_train_modified
 
+
     def drop_variable_before_preparation(self, df):
         df = df.drop(['Alley'], axis=1)
         df = df.drop(['MasVnrType'], axis=1)
@@ -259,12 +190,13 @@ class HousePrices(object):
         #               "Fence","MiscFeature"], axis=1)
         return df
 
+
     def drop_variable(self, df):
         if HousePrices.is_one_hot_encoder:
             # Drop all categorical feature helping columns ('Num')
             for feature_name in HousePrices.non_numerical_feature_names:
                 df = df.drop([''.join([feature_name, 'Num'])], axis=1)
-                # df = df.drop([feature_name], axis=1)
+
         # df = df.drop(['Fireplaces'], axis=1)
         df = df.drop(['Id'], axis=1)
 
@@ -278,28 +210,15 @@ class HousePrices(object):
         df = df.copy()
         # df = self.drop_variable_before_preparation(df)
 
-        # HousePrices.non_numerical_feature_names = self.extract_non_numerical_features(df)._get_axis(1)
-        # HousePrices.numerical_feature_names = self.extract_numerical_features(df)._get_axis(1)
-
-        # Test that non numerical works as well
+        # Todo: correct extract_non_numerical_features() and check if similar things are new in python 3.5
         HousePrices.non_numerical_feature_names = self.extract_non_numerical_features(df)._get_axis(1)
         HousePrices.numerical_feature_names = self.extract_numerical_features(df)
-
         # HousePrices.non_numerical_feature_names = ['MSZoning', 'LotShape', 'Neighborhood', 'BldgType', 'HouseStyle', 'Foundation', 'Heating']
 
-        # numerical_features_names = self.extract_numerical_features(df)._get_axis(1)
         numerical_features_names = self.extract_numerical_features(df)
-        count_null_pre_mice_num = df[numerical_features_names].isnull().sum().sum()
-        count_null_pre_mice = df.isnull().sum().sum()
-        # df = self.feature_mapping_to_numerical_values(df)
         self.feature_mapping_to_numerical_values(df)
-        count_null_pre_mice_num_post_feat = df[numerical_features_names].isnull().sum().sum()
-        count_null_pre_mice_post_feat = df.isnull().sum().sum()
         self.feature_engineering(df)
         df = self.clean_data(df)
-        # self.clean_data(df)
-        count_null_post_mice_num = df[numerical_features_names].isnull().sum().sum()
-        count_null_post_mice = df.isnull().sum().sum()
         df = self.drop_variable(df)
         df = self.feature_scaling(df)
         return df
@@ -320,7 +239,6 @@ class HousePrices(object):
         random.seed(129)
         mice = MICE()  #model=RandomForestClassifier(n_estimators=100))
         res = mice.complete(np.asarray(df.values, dtype=float))
-        # df_estimated_var[df.columns] = res[:][:]
         df_estimated_var.loc[:, df.columns] = res[:][:]
         return df_estimated_var
 
@@ -328,8 +246,6 @@ class HousePrices(object):
     def feature_scaling(self, df):
         df = df.copy()
         # Standardization (centering and scaling) of dataset that removes mean and scales to unit variance
-        # Todo: change to correct numerical_features_names
-        # numerical_features_names = self.extract_numerical_features(df)._get_axis(1).values
         numerical_features_names = self.extract_numerical_features(df)
         standard_scaler = StandardScaler()
         if any(df.columns == 'SalePrice'):
@@ -490,15 +406,8 @@ def main():
     # Check if feature_var_names of test exist that do not appear in training set
     feature_var_names_addition_to_training_set = house_prices.feature_var_names_in_training_set_not_in_test_set(df_test.columns, df.columns)
 
-    # train_data = df.values
-    # test_data = df_test.values
-    # Drop the zero feature var name columns that was inserted into test data, since the names only occured in the training data.
     df = df[house_prices.df_test_all_feature_var_names.insert(np.shape(house_prices.df_test_all_feature_var_names)[0], 'SalePrice')]
     df_test = df_test[house_prices.df_test_all_feature_var_names]
-    # df_test_numerical_features = house_prices.extract_numerical_features(df_test)
-    # train_data = df[df_test_numerical_features].values
-    # test_data = df_test[df_test_numerical_features].values
-    # house_prices.extract_numerical_features(df_test).columns == house_prices.extract_numerical_features(df).columns[:house_prices.extract_numerical_features(df_test).columns.shape[0]]
     train_data = df[house_prices.extract_numerical_features(df)].values
     test_data = df_test[house_prices.extract_numerical_features(df_test)].values
     # print(sum(np.isnan(train_data)).sum()) # 348 is nan
@@ -734,6 +643,7 @@ def main():
         plt.axis('tight')
         plt.show()
 
+
     is_make_a_prediction = 1
     if is_make_a_prediction:
         ''' Random Forest '''
@@ -758,9 +668,6 @@ def main():
                         max_iter=50000, cv=10)
         # Todo: make a copy of lasso object
         # lasso_copy = lasso
-        # lasso_copied = LassoCV(alphas=[0.0001, 0.0003, 0.0006, 0.001, 0.003, 0.006, 0.01, 0.03, 0.06, 0.1,
-        #                        0.3, 0.6, 1],
-        #                        max_iter=50000, cv=10)
 
         # Exclude outliers
         X_train, y_train = house_prices.outlier_identification(lasso, X_train, y_train)
@@ -955,6 +862,7 @@ def main():
         # output = (output_feature_selection_lasso + output_ridge) / 2.0
         output = output_feature_selection_lasso
         # print np.shape(output_ridge) == np.shape(output_lasso)
+
 
 
 
