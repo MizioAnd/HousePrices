@@ -163,30 +163,42 @@ class HousePrices(object):
     def feature_engineering(self, df):
         # df['LotAreaSquareMeters'] = self.square_feet_to_meters(df.LotArea.values)
 
-        # Treat all numerical variables that were not one-hot encoded
-        numeric_feats = HousePrices.numerical_feature_names
-        # df.loc[:, tuple(numeric_feats)] = np.log1p(df[numeric_feats])
+        is_skewness_correction_for_all_features = 1
+        if is_skewness_correction_for_all_features:
+            # Correcting for skewness
+            # Treat all numerical variables that were not one-hot encoded
+            if any(df.columns == 'SalePrice'):
+                numerical_feature_names_of_non_modified_df = self.extract_numerical_features(self.df)
+            else:
+                numerical_feature_names_of_non_modified_df = self.extract_numerical_features(self.df_test)
 
-        # only scale down sale price, since all other numerical features have been treated in feature_scaling
-        if any(df.columns == 'SalePrice'):
-            self.is_with_log1p_SalePrice = 1
-            df.loc[:, tuple(['SalePrice'])] = np.log1p(df.SalePrice)
+            numerical_feature_names_of_non_modified_df = np.concatenate([HousePrices.feature_names_Num.values, numerical_feature_names_of_non_modified_df.values])
+            relevant_features = df[numerical_feature_names_of_non_modified_df].columns[(df[numerical_feature_names_of_non_modified_df].columns != 'Id')]
+            self.skew_correction(df, relevant_features)
+        else:
+            # Only scale down sale price, since all leave other numerical features standardized.
+            if any(df.columns == 'SalePrice'):
+                self.skew_correction(df, 'SalePrice')
+                # self.is_with_log1p_SalePrice = 1
+                # df.loc[:, tuple(['SalePrice'])] = np.log1p(df.SalePrice)
 
-        # if ~HousePrices.is_one_hot_encoder:
-        #     categorical_features_labelencoded_instead_of_one_hot_encoded = HousePrices.feature_names_Num
+
+            # df.loc[:, tuple(numeric_feats)] = np.log1p(df[numeric_feats])
+
+            # if ~HousePrices.is_one_hot_encoder:
+            #     categorical_features_labelencoded_instead_of_one_hot_encoded = HousePrices.feature_names_Num
             # Todo: drop NaNs
             # Todo: implement similar to feature_scaling
             # df_feature_engineer = df.dropna()
             # df.loc[:, tuple(categorical_features_labelencoded_instead_of_one_hot_encoded)] = np.log1p(df[categorical_features_labelencoded_instead_of_one_hot_encoded])
 
-
+    def skew_correction(self, df, numerical_features):
         # Skew correction
-        # skewed_feats = df[numeric_feats].apply(lambda x: skew(x.dropna()))  # compute skewness
-        # skewed_feats = skewed_feats[skewed_feats > 0.75]
-        # skewed_feats = skewed_feats.index
-        # df[skewed_feats] = np.log1p(df[skewed_feats])
-        # df.loc[:, tuple(skewed_feats)] = np.log1p(df[skewed_feats])
-
+        skewed_feats = df[numerical_features].apply(lambda x: skew(x.dropna()))  # compute skewness
+        skewed_feats = skewed_feats[skewed_feats > 0.75]
+        skewed_feats = skewed_feats.index
+        # df[skewed_feats] = np.log1p(np.asarray(df[skewed_feats], dtype=float))
+        df.loc[:, tuple(skewed_feats)] = np.log1p(np.asarray(df[skewed_feats], dtype=float))
 
 
     def outlier_prediction(self, X_train, y_train):
@@ -245,7 +257,6 @@ class HousePrices(object):
         HousePrices.numerical_feature_names = self.extract_numerical_features(df)
         # HousePrices.non_numerical_feature_names = ['MSZoning', 'LotShape', 'Neighborhood', 'BldgType', 'HouseStyle', 'Foundation', 'Heating']
 
-        numerical_features_names = self.extract_numerical_features(df)
         self.feature_mapping_to_numerical_values(df)
         self.feature_engineering(df)
         df = self.clean_data(df)
@@ -936,6 +947,7 @@ def main():
         # output = (output_feature_selection_lasso + output_ridge) / 2.0
         output = output_feature_selection_lasso
         # print np.shape(output_ridge) == np.shape(output_lasso)
+
 
 
     if is_simple_model or is_make_a_prediction:
