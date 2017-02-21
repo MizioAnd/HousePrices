@@ -34,11 +34,15 @@ class HousePrices(object):
         self.df_all_feature_var_names = []
         self.df_test_all_feature_var_names = []
         self.timestamp = datetime.datetime.now().strftime('%Y%m%d_%Hh%Mm%Ss')
+        self.is_with_log1p_SalePrice = 0
+
 
     # Private variables
     non_numerical_feature_names = []
     numerical_feature_names = []
     is_one_hot_encoder = []
+    feature_names_Num = []
+
 
     ''' Pandas Data Frame '''
     df = pd.read_csv('/home/user/Documents/Kaggle/HousePrices/train.csv', header=0)
@@ -116,7 +120,7 @@ class HousePrices(object):
 
     def feature_mapping_to_numerical_values(self, df):
         mask = ~df.isnull()
-        HousePrices.is_one_hot_encoder = 1
+        HousePrices.is_one_hot_encoder = 0
         if HousePrices.is_one_hot_encoder:
             for feature_name in HousePrices.non_numerical_feature_names:
                 is_with_label_binarizer = 0
@@ -144,8 +148,16 @@ class HousePrices(object):
                 # All one-hot encoded feature var names occuring in test data is assigned the private public varaible df_test_all_feature_var_names.
                 self.df_test_all_feature_var_names = df.columns
         else:
+            feature_names_Num = np.zeros((HousePrices.non_numerical_feature_names.shape[0],), dtype=object)
+            ith = 0
             for feature_name in HousePrices.non_numerical_feature_names:
+                # Todo: create a feature_nameNum list
+                feature_name_num = ''.join([feature_name, 'Num'])
+                feature_names_Num[ith] = feature_name_num
+                ith += 1
                 self.encode_labels_in_numeric_format(df, feature_name)
+            HousePrices.feature_names_Num = pd.Series(data=feature_names_Num, dtype=object)
+            # HousePrices.feature_names_Num = feature_names_Num
 
 
     def feature_engineering(self, df):
@@ -153,10 +165,28 @@ class HousePrices(object):
 
         # Treat all numerical variables that were not one-hot encoded
         numeric_feats = HousePrices.numerical_feature_names
-        skewed_feats = df[numeric_feats].apply(lambda x: skew(x.dropna()))  # compute skewness
-        skewed_feats = skewed_feats[skewed_feats > 0.75]
-        skewed_feats = skewed_feats.index
-        df[skewed_feats] = np.log1p(df[skewed_feats])
+        # df.loc[:, tuple(numeric_feats)] = np.log1p(df[numeric_feats])
+
+        # only scale down sale price, since all other numerical features have been treated in feature_scaling
+        if any(df.columns == 'SalePrice'):
+            self.is_with_log1p_SalePrice = 1
+            df.loc[:, tuple(['SalePrice'])] = np.log1p(df.SalePrice)
+
+        # if ~HousePrices.is_one_hot_encoder:
+        #     categorical_features_labelencoded_instead_of_one_hot_encoded = HousePrices.feature_names_Num
+            # Todo: drop NaNs
+            # Todo: implement similar to feature_scaling
+            # df_feature_engineer = df.dropna()
+            # df.loc[:, tuple(categorical_features_labelencoded_instead_of_one_hot_encoded)] = np.log1p(df[categorical_features_labelencoded_instead_of_one_hot_encoded])
+
+
+        # Skew correction
+        # skewed_feats = df[numeric_feats].apply(lambda x: skew(x.dropna()))  # compute skewness
+        # skewed_feats = skewed_feats[skewed_feats > 0.75]
+        # skewed_feats = skewed_feats.index
+        # df[skewed_feats] = np.log1p(df[skewed_feats])
+        # df.loc[:, tuple(skewed_feats)] = np.log1p(df[skewed_feats])
+
 
 
     def outlier_prediction(self, X_train, y_train):
@@ -219,8 +249,8 @@ class HousePrices(object):
         self.feature_mapping_to_numerical_values(df)
         self.feature_engineering(df)
         df = self.clean_data(df)
-        df = self.drop_variable(df)
         df = self.feature_scaling(df)
+        df = self.drop_variable(df)
         return df
 
 
@@ -246,20 +276,48 @@ class HousePrices(object):
     def feature_scaling(self, df):
         df = df.copy()
         # Standardization (centering and scaling) of dataset that removes mean and scales to unit variance
-        numerical_features_names = self.extract_numerical_features(df)
         standard_scaler = StandardScaler()
         if any(df.columns == 'SalePrice'):
+            numerical_feature_names_of_non_modified_df = self.extract_numerical_features(self.df)
+            if ~HousePrices.is_one_hot_encoder:
+                # Todo: merge the two variables of type pandas.indexes.base.Index
+                # we need the feature_nameNum features
+                # numerical_feature_names_of_non_modified_df = numerical_feature_names_of_non_modified_df.insert(np.shape(numerical_feature_names_of_non_modified_df)[0], HousePrices.non_numerical_feature_names)
+                # numerical_feature_names_of_non_modified_df = numerical_feature_names_of_non_modified_df.insert(np.shape(numerical_feature_names_of_non_modified_df)[0], HousePrices.feature_names_Num)
+                numerical_feature_names_of_non_modified_df = np.concatenate([HousePrices.feature_names_Num.values, numerical_feature_names_of_non_modified_df.values])
+            # Include scaling of SalePrice
             y = df.SalePrice.values
-
-            mask = ~df[df[numerical_features_names].columns[df[numerical_features_names].columns != 'SalePrice']].isnull()
-            # df.loc[mask, df[numerical_features_names].columns[df[numerical_features_names].columns != 'SalePrice']] = \
-            #     standard_scaler.fit_transform(X=df[df[numerical_features_names].columns[df[numerical_features_names].columns != 'SalePrice']][mask].values, y=y)
-            df[df[numerical_features_names].columns[df[numerical_features_names].columns != 'SalePrice']] = standard_scaler.fit_transform(X=df[df[numerical_features_names].columns[df[numerical_features_names].columns != 'SalePrice']][mask].values, y=y)
+            relevant_features = df[numerical_feature_names_of_non_modified_df].columns[(df[numerical_feature_names_of_non_modified_df].columns != 'SalePrice') & (df[numerical_feature_names_of_non_modified_df].columns != 'Id')]
+            mask = ~df[relevant_features].isnull()
+            res = standard_scaler.fit_transform(X=df[relevant_features][mask].values, y=y)
+            if (~mask).sum().sum() > 0:
+                df = self.standardize_relevant_features(df, relevant_features, res)
+            else:
+                df.loc[:, tuple(relevant_features)] = res
         else:
-            # mask = ~df[numerical_features_names].isnull()
-            # df.loc[mask, numerical_features_names] = standard_scaler.fit_transform(df[numerical_features_names][mask].values)
-            df[numerical_features_names] = standard_scaler.fit_transform(df[numerical_features_names].values)
+            numerical_feature_names_of_non_modified_df = self.extract_numerical_features(self.df_test)
+            if ~HousePrices.is_one_hot_encoder:
+                numerical_feature_names_of_non_modified_df = np.concatenate([HousePrices.feature_names_Num.values, numerical_feature_names_of_non_modified_df.values])
+
+            relevant_features = df[numerical_feature_names_of_non_modified_df].columns[(df[numerical_feature_names_of_non_modified_df].columns != 'Id')]
+            mask = ~df[relevant_features].isnull()
+            res = standard_scaler.fit_transform(df[relevant_features][mask].values)
+            if mask.sum().sum() > 0:
+                df = self.standardize_relevant_features(df, relevant_features, res)
+            else:
+                df.loc[:, tuple(relevant_features)] = res
         return df
+
+
+    def standardize_relevant_features(self, df, relevant_features, res):
+        i_column = 0
+        for feature in relevant_features:
+            mask = ~df[feature].isnull()
+            mask_index = mask[mask == 1].index
+            df.loc[mask_index, tuple([feature])] = res[:, i_column]
+            i_column += 1
+        return df
+
 
     def missing_values_in_DataFrame(self, df):
         mask = self.features_with_null_logical(df)
@@ -491,11 +549,27 @@ def main():
             print('\nTotal Records for values: {}\n'.format(df.count().sum() + df_test.count().sum()))
             print('Total Records for missing values: {}\n'.format(df.isnull().sum().sum() + df_test.isnull().sum().sum()))
 
+            # Train Data: numeric feature columns with none or nan in test data
+            print('\nColumns in train data with none/nan values:\n')
+            print('\nTraining set numerical features\' missing values')
+            df_numerical_features = house_prices.extract_numerical_features(df)
+            house_prices.missing_values_in_DataFrame(df[df_numerical_features])
+
+            # Test Data: Print numeric feature columns with none/nan in test data
+            print('\nColumns in test data with none/nan values:\n')
+            print('\nTest set numerical features\' missing values')
+            df_test_numerical_features = house_prices.extract_numerical_features(df_test)
+            house_prices.missing_values_in_DataFrame(df_test[df_test_numerical_features])
+
+
+
             print('All Training set missing values')
             house_prices.missing_values_in_DataFrame(df)
 
             print('All Test set missing values')
             house_prices.missing_values_in_DataFrame(df_test)
+
+            df[house_prices.extract_numerical_features(df)]
 
             # Overview of missing values in non numerical features
             # print("Training set numerical features\' missing values")
@@ -864,9 +938,6 @@ def main():
         # print np.shape(output_ridge) == np.shape(output_lasso)
 
 
-
-
-
     if is_simple_model or is_make_a_prediction:
         ''' Submission '''
         save_path = '/home/user/Documents/Kaggle/HousePrices/submission/'
@@ -879,7 +950,9 @@ def main():
 
         # Exp() is needed in order to get the correct sale price, since we took a log() earlier
         # if not is_simple_model:
-        output = np.expm1(output)
+        if house_prices.is_with_log1p_SalePrice:
+            output = np.expm1(output)
+
         submission = pd.DataFrame({'Id': Id_df_test, 'SalePrice': output})
         submission.to_csv(''.join([save_path, 'submission_house_prices_', house_prices.timestamp, '.csv']), index=False)
 
