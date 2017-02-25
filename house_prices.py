@@ -70,17 +70,18 @@ class HousePrices(object):
     def clean_data(self, df):
         df = df.copy()
         is_with_MICE = 1
-        if is_with_MICE:
-            # Imputation using MICE
-            numerical_features_names = self.extract_numerical_features(df)
-            df.loc[:, tuple(numerical_features_names)] = self.estimate_by_mice(df[numerical_features_names])
-        else:
-            if any(tuple(df.columns == 'SalePrice')):
-                df = df.dropna()
+        if df.isnull().sum().sum() > 0:
+            if is_with_MICE:
+                # Imputation using MICE
+                numerical_features_names = self.extract_numerical_features(df)
+                df.loc[:, tuple(numerical_features_names)] = self.estimate_by_mice(df[numerical_features_names])
             else:
-                df = df.dropna(1)
-                HousePrices.feature_names_num = pd.Series(data=np.intersect1d(HousePrices.feature_names_num.values,
-                                                                              df.columns), dtype=object)
+                if any(tuple(df.columns == 'SalePrice')):
+                    df = df.dropna()
+                else:
+                    df = df.dropna(1)
+                    HousePrices.feature_names_num = pd.Series(data=np.intersect1d(HousePrices.feature_names_num.values,
+                                                                                  df.columns), dtype=object)
         return df
 
     @staticmethod
@@ -128,7 +129,7 @@ class HousePrices(object):
         return np.array(feature_var_name_addition_list)
 
     def feature_mapping_to_numerical_values(self, df):
-        HousePrices.is_one_hot_encoder = 0
+        HousePrices.is_one_hot_encoder = 1
         mask = ~df.isnull()
         # Assume that training set has all possible feature_var_names
         # Although it may occur in real life that a training set may hold a feature_var_name. But it is probably
@@ -225,15 +226,20 @@ class HousePrices(object):
 
         return x_train_modified, y_train_modified
 
-    @staticmethod
-    def drop_variable_before_preparation(df):
+    def drop_variable_before_preparation(self, df):
+        # Acceptable limit of NaN in features
+        limit_of_nans = 0.3
+        for feature in self.features_with_missing_values_in_dataframe(df).index:
+            if df[feature].isnull().sum() > limit_of_nans*df.shape[0]:
+                df = df.drop([feature], axis=1)
+
         # df = df.drop(['Alley'], axis=1)
         # df = df.drop(['MasVnrType'], axis=1)
-        df = df.drop(["Utilities", "LotFrontage", "MasVnrType", "MasVnrArea", "BsmtQual",
-                      "BsmtCond", "BsmtExposure", "BsmtFinType1", "BsmtFinType2",
-                      "Electrical", "FireplaceQu", "GarageType", "GarageYrBlt",
-                      "GarageFinish", "GarageQual", "GarageCond", "PoolQC",
-                      "Fence", "MiscFeature"], axis=1)
+        # df = df.drop(["Utilities", "LotFrontage", "Alley", "MasVnrType", "MasVnrArea", "BsmtQual",
+        #               "BsmtCond", "BsmtExposure", "BsmtFinType1", "BsmtFinType2",
+        #               "Electrical", "FireplaceQu", "GarageType", "GarageYrBlt",
+        #               "GarageFinish", "GarageQual", "GarageCond", "PoolQC",
+        #               "Fence", "MiscFeature"], axis=1)
         return df
 
     def drop_variable(self, df):
@@ -252,7 +258,7 @@ class HousePrices(object):
 
     def prepare_data_random_forest(self, df):
         df = df.copy()
-        # df = self.drop_variable_before_preparation(df)
+        df = self.drop_variable_before_preparation(df)
 
         # Todo: correct extract_non_numerical_features() and check if similar things are new in python 3.5
         HousePrices.non_numerical_feature_names = HousePrices.extract_non_numerical_features(df)._get_axis(1)
@@ -290,9 +296,8 @@ class HousePrices(object):
         df = df.copy()
         # Standardization (centering and scaling) of dataset that removes mean and scales to unit variance
         standard_scaler = StandardScaler()
+        numerical_feature_names_of_non_modified_df = HousePrices.numerical_feature_names
         if any(tuple(df.columns == 'SalePrice')):
-            # numerical_feature_names_of_non_modified_df = HousePrices.extract_numerical_features(self.df)
-            numerical_feature_names_of_non_modified_df = HousePrices.numerical_feature_names
             if not HousePrices.is_one_hot_encoder:
                 # Todo: merge the two variables of type pandas.indexes.base.Index
                 # we need the feature_nameNum features
@@ -314,7 +319,6 @@ class HousePrices(object):
             else:
                 df.loc[:, tuple(relevant_features)] = res
         else:
-            numerical_feature_names_of_non_modified_df = HousePrices.extract_numerical_features(self.df_test)
             if not HousePrices.is_one_hot_encoder:
                 numerical_feature_names_of_non_modified_df = np.concatenate(
                     [HousePrices.feature_names_num.values, numerical_feature_names_of_non_modified_df.values])
@@ -343,6 +347,11 @@ class HousePrices(object):
         mask = self.features_with_null_logical(df)
         print(df[mask[mask == 0].index.values].isnull().sum())
         print('\n')
+
+    def features_with_missing_values_in_dataframe(self, df):
+        df = df.copy()
+        mask = self.features_with_null_logical(df)
+        return df[mask[mask == 0].index.values].isnull().sum()
 
     @staticmethod
     def rmse_cv(model, x_train, y_train):
@@ -384,7 +393,7 @@ class HousePrices(object):
         #                         0.3, 0.6, 1], cv=10)
 
         lasso.fit(x_train_split, y_train_split)
-        y_predicted = lasso.predict(x_test_split)
+        y_predicted = lasso.predict(X=x_test_split)
         plt.figure(figsize=(10, 5))
         plt.scatter(y_test_split, y_predicted, s=20)
         rmse_pred_vs_actual = self.rmse(y_predicted, y_test_split)
@@ -934,8 +943,8 @@ def main():
             print('\nSCORE XGBRegressor train data:---------------------------------------------------')
             print(clf.best_score_)
             print(clf.best_params_)
-        save_path = '/home/user/Documents/Kaggle/HousePrices/house_prices_clone_0/predicted_vs_actual/'
 
+        save_path = '/home/user/Documents/Kaggle/HousePrices/house_prices_clone_0/predicted_vs_actual/'
         house_prices.multipage(''.join([save_path, 'Overview_estimators_rmse_', house_prices.timestamp, '.pdf']))
         plt.show()
 
