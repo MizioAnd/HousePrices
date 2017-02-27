@@ -132,7 +132,7 @@ class HousePrices(object):
         return np.array(feature_var_name_addition_list)
 
     def feature_mapping_to_numerical_values(self, df):
-        HousePrices._is_one_hot_encoder = 1
+        HousePrices._is_one_hot_encoder = 0
         mask = ~df.isnull()
         # Assume that training set has all possible feature_var_names
         # Although it may occur in real life that a training set may hold a feature_var_name. But it is probably
@@ -174,7 +174,8 @@ class HousePrices(object):
     def feature_agglomeration(df):
         df = df.copy()
         # Todo: find optimal number of clusters for the feature clustering
-        number_of_clusters = int(df.shape[1]/2)
+        # number_of_clusters = int(df.shape[1]/2)
+        number_of_clusters = int(df.shape[1] / 1.2)
         from sklearn.cluster import FeatureAgglomeration
         agglomerated_features = FeatureAgglomeration(n_clusters=number_of_clusters)
         # mask = ~df[features].isnull()
@@ -196,8 +197,51 @@ class HousePrices(object):
         print(''.join(['labels:', str(agglomerated_features.labels_)]))
         print(''.join(['Children:', str(agglomerated_features.children_)]))
         print(''.join(['number of leaves in the hierarchical tree:', str(agglomerated_features.n_leaves_)]))
+        HousePrices.dendrogram(df, number_of_clusters, agglomerated_features.labels_)
         df = pd.DataFrame(data=res)
         return df
+
+    @staticmethod
+    def dendrogram(df, number_of_clusters, agglomerated_feature_labels):
+        import seaborn as sns
+        # Todo: Create Dendrogram
+        # used networks are the labels occuring in agglomerated_features.labels_
+        # which corresponds to np.arange(0, number_of_clusters)
+        # number_of_clusters = int(df.shape[1] / 1.2)
+        # used_networks = np.arange(0, number_of_clusters, dtype=int)
+        used_networks = np.unique(agglomerated_feature_labels)
+        # used_networks = [1, 5, 6, 7, 8, 11, 12, 13, 16, 17]
+
+        # In our case all columns are clustered, which means used_columns is true in every element
+        # used_columns = (df.columns.get_level_values(None)
+                        # .astype(int)
+                        # .isin(used_networks))
+        # used_columns = (agglomerated_feature_labels.astype(int).isin(used_networks))
+        # df = df.loc[:, used_columns]
+
+        # Create a custom palette to identify the networks
+        network_pal = sns.cubehelix_palette(len(used_networks),
+                                            light=.9, dark=.1, reverse=True,
+                                            start=1, rot=-2)
+        network_lut = dict(zip(map(str, df.columns), network_pal))
+
+        # Convert the palette to vectors that will be drawn on the side of the matrix
+        networks = df.columns.get_level_values(None)
+        # networks = agglomerated_feature_labels
+        network_colors = pd.Series(networks, index=df.columns).map(network_lut)
+        # plt.figure()
+        # cg = sns.clustermap(df, metric="correlation")
+        # plt.setp(cg.ax_heatmap.yaxis.get_majorticklabels(), rotation=0)
+        sns.set(font="monospace")
+        # Create custom colormap
+        cmap = sns.diverging_palette(h_neg=210, h_pos=350, s=90, l=30, as_cmap=True)
+        cg = sns.clustermap(df.astype(float).corr(), cmap=cmap, linewidths=.5, row_colors=network_colors,
+                            col_colors=network_colors)
+        plt.setp(cg.ax_heatmap.yaxis.get_majorticklabels(), rotation=0)
+        plt.setp(cg.ax_heatmap.xaxis.get_majorticklabels(), rotation=90)
+        # plt.xticks(rotation=90)
+        plt.show()
+
 
     def feature_engineering(self, df):
         # df['LotAreaSquareMeters'] = self.square_feet_to_meters(df.LotArea.values)
@@ -312,16 +356,19 @@ class HousePrices(object):
             dataframe_name = 'test_debug'
 
         # one-hot encoded
-        # date_time = '20170227_11h46m53s'
-        # date_time = '20170227_12h19m16s'
-        # date_time = '20170227_15h36m21s'
-        date_time = '20170227_16h50m45s'
+        # date_time = '20170227_11h46m53s'  # has num col
+        # date_time = '20170227_12h19m16s'  # has num col
+        # date_time = '20170227_15h36m21s'  # has num col
+        # corrected below
+        # date_time = '20170227_16h50m45s'
         # not one-hot
         # date_time = '20170226_19h53m38s'
         # date_time = '20170227_14h51m53s'
         # date_time = '20170227_15h04m15s'
         # date_time = '20170227_15h57m09s'
         # date_time = '20170227_16h04m23s'
+        # corrected below
+        date_time = '20170228_00h05m40s'
         return pd.read_csv(''.join([HousePrices._save_path, dataframe_name, date_time, '.csv']), header=0)
 
     @staticmethod
@@ -1085,6 +1132,7 @@ def main():
 
         submission = pd.DataFrame({'Id': Id_df_test, 'SalePrice': output})
         submission.to_csv(''.join([save_path, 'submission_house_prices_', house_prices.timestamp, '.csv']), index=False)
+        print(house_prices.timestamp)
 
 if __name__ == '__main__':
     main()
