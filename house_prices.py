@@ -35,10 +35,13 @@ class HousePrices(object):
         self.is_with_log1p_SalePrice = 0
 
     # Private variables
-    non_numerical_feature_names = []
-    numerical_feature_names = []
-    is_one_hot_encoder = []
-    feature_names_num = []
+    _non_numerical_feature_names = []
+    _numerical_feature_names = []
+    _is_one_hot_encoder = []
+    _feature_names_num = []
+    _save_path = '/home/user/Documents/Kaggle/HousePrices/'
+    _is_train_debug = 0
+    _is_dataframe_with_sale_price = 1
 
     ''' Pandas Data Frame '''
     df = pd.read_csv('/home/user/Documents/Kaggle/HousePrices/train.csv', header=0)
@@ -80,7 +83,7 @@ class HousePrices(object):
                     df = df.dropna()
                 else:
                     df = df.dropna(1)
-                    HousePrices.feature_names_num = pd.Series(data=np.intersect1d(HousePrices.feature_names_num.values,
+                    HousePrices._feature_names_num = pd.Series(data=np.intersect1d(HousePrices._feature_names_num.values,
                                                                                   df.columns), dtype=object)
         return df
 
@@ -129,7 +132,7 @@ class HousePrices(object):
         return np.array(feature_var_name_addition_list)
 
     def feature_mapping_to_numerical_values(self, df):
-        HousePrices.is_one_hot_encoder = 1
+        HousePrices._is_one_hot_encoder = 0
         mask = ~df.isnull()
         # Assume that training set has all possible feature_var_names
         # Although it may occur in real life that a training set may hold a feature_var_name. But it is probably
@@ -141,16 +144,16 @@ class HousePrices(object):
             # df_test_all_feature_var_names.
             self.df_test_all_feature_var_names = df.columns
 
-        feature_names_num = np.zeros((HousePrices.non_numerical_feature_names.shape[0],), dtype=object)
+        _feature_names_num = np.zeros((HousePrices._non_numerical_feature_names.shape[0],), dtype=object)
         ith = 0
-        for feature_name in HousePrices.non_numerical_feature_names:
+        for feature_name in HousePrices._non_numerical_feature_names:
             # Create a feature_nameNum list
             feature_name_num = ''.join([feature_name, 'Num'])
-            feature_names_num[ith] = feature_name_num
+            _feature_names_num[ith] = feature_name_num
             ith += 1
             HousePrices.encode_labels_in_numeric_format(df, feature_name)
 
-            if HousePrices.is_one_hot_encoder:
+            if HousePrices._is_one_hot_encoder:
                 is_with_label_binarizer = 0
                 if is_with_label_binarizer:
                     if feature_name == 'MasVnrType':
@@ -165,7 +168,34 @@ class HousePrices(object):
                         df[ite] = feature_var_values[ite]
                 else:
                     HousePrices.one_hot_encoder(df, feature_name)
-        HousePrices.feature_names_num = pd.Series(data=feature_names_num, dtype=object)
+        HousePrices._feature_names_num = pd.Series(data=_feature_names_num, dtype=object)
+
+    @staticmethod
+    def feature_agglomeration(df):
+        df = df.copy()
+        # Todo: find optimal number of clusters for the feature clustering
+        number_of_clusters = int(df.shape[1]/2)
+        from sklearn.cluster import FeatureAgglomeration
+        agglomerated_features = FeatureAgglomeration(n_clusters=number_of_clusters)
+        # mask = ~df[features].isnull()
+        # mask_index = mask[mask == 1].index
+        if any(tuple(df.columns == 'SalePrice')):
+            # res = agglomerated_features.fit_transform(np.reshape(np.array(df[HousePrices._feature_names_num.values]
+            #                                                               [mask].values),
+            #                                                      df[HousePrices._feature_names_num.values][mask].shape),
+            #                                           y=df.SalePrice.values).toarray()
+
+            res = agglomerated_features.fit_transform(np.reshape(np.array(df.dropna().values), df.dropna()
+                                                                 .shape), y=df.SalePrice.values)
+        else:
+            res = agglomerated_features.fit_transform(np.reshape(np.array(df.dropna().values), df.dropna()
+                                                                 .shape))
+        # Todo: in case of adding values using df.loc[], remember mask is only possible for a single feature at a time.
+        print(''.join(['labels:', str(agglomerated_features.labels_)]))
+        print(''.join(['Children:', str(agglomerated_features.children_)]))
+        print(''.join(['number of leaves in the hierarchical tree:', str(agglomerated_features.n_leaves_)]))
+        df = pd.DataFrame(data=res)
+        return df
 
     def feature_engineering(self, df):
         # df['LotAreaSquareMeters'] = self.square_feet_to_meters(df.LotArea.values)
@@ -177,12 +207,12 @@ class HousePrices(object):
             if any(tuple(df.columns == 'SalePrice')):
                 self.is_with_log1p_SalePrice = 1
 
-            numerical_feature_names_of_non_modified_df = HousePrices.numerical_feature_names
+            numerical_feature_names_of_non_modified_df = HousePrices._numerical_feature_names
 
-            if HousePrices.is_one_hot_encoder:
+            if HousePrices._is_one_hot_encoder:
                 numerical_feature_names_of_non_modified_df = numerical_feature_names_of_non_modified_df.values
             else:
-                numerical_feature_names_of_non_modified_df = np.concatenate([HousePrices.feature_names_num.values,
+                numerical_feature_names_of_non_modified_df = np.concatenate([HousePrices._feature_names_num.values,
                                                                              numerical_feature_names_of_non_modified_df
                                                                             .values])
 
@@ -228,9 +258,10 @@ class HousePrices(object):
 
     def drop_variable_before_preparation(self, df):
         # Acceptable limit of NaN in features
-        limit_of_nans = 0.3
+        limit_of_nans = 0.3*df.shape[0]
+        # limit_of_nans = 800
         for feature in self.features_with_missing_values_in_dataframe(df).index:
-            if df[feature].isnull().sum() > limit_of_nans*df.shape[0]:
+            if df[feature].isnull().sum() > limit_of_nans:
                 df = df.drop([feature], axis=1)
 
         # df = df.drop(['Alley'], axis=1)
@@ -243,10 +274,16 @@ class HousePrices(object):
         return df
 
     def drop_variable(self, df):
-        if HousePrices.is_one_hot_encoder:
+        if HousePrices._is_one_hot_encoder:
             # Drop all categorical feature helping columns ('Num')
-            for feature_name in HousePrices.feature_names_num:
+            for feature_name in HousePrices._feature_names_num:
                 df = df.drop([feature_name], axis=1)
+
+        # is_with_feature_agglomeration = 0
+        # if is_with_feature_agglomeration:
+        #     print(df.shape)
+        #     df = HousePrices.feature_agglomeration(df)
+        #     print(df.shape)
 
         # df = df.drop(['Fireplaces'], axis=1)
         df = df.drop(['Id'], axis=1)
@@ -256,20 +293,50 @@ class HousePrices(object):
             self.df_test_all_feature_var_names = df.columns
         return df
 
+    def save_dataframe(self, df):
+        if HousePrices._is_dataframe_with_sale_price:
+            df.to_csv(''.join([HousePrices._save_path, 'train_debug', self.timestamp, '.csv']), index=False)
+        else:
+            df.to_csv(''.join([HousePrices._save_path, 'test_debug', self.timestamp, '.csv']), index=False)
+
+    def load_dataframe(self):
+        if HousePrices._is_dataframe_with_sale_price:
+            dataframe_name = 'train_debug'
+        else:
+            dataframe_name = 'test_debug'
+
+        date_time = '20170226_19h53m38s'
+        return pd.read_csv(''.join([HousePrices._save_path, dataframe_name, date_time, '.csv']), header=0)
+
     def prepare_data_random_forest(self, df):
         df = df.copy()
         df = self.drop_variable_before_preparation(df)
 
         # Todo: correct extract_non_numerical_features() and check if similar things are new in python 3.5
-        HousePrices.non_numerical_feature_names = HousePrices.extract_non_numerical_features(df)._get_axis(1)
-        HousePrices.numerical_feature_names = HousePrices.extract_numerical_features(df)
-        # HousePrices.non_numerical_feature_names = ['MSZoning', 'LotShape', 'Neighborhood', 'BldgType', 'HouseStyle',
+        HousePrices._non_numerical_feature_names = HousePrices.extract_non_numerical_features(df)._get_axis(1)
+        HousePrices._numerical_feature_names = HousePrices.extract_numerical_features(df)
+        # HousePrices._non_numerical_feature_names = ['MSZoning', 'LotShape', 'Neighborhood', 'BldgType', 'HouseStyle',
         # 'Foundation', 'Heating']
 
-        self.feature_mapping_to_numerical_values(df)
-        self.feature_engineering(df)
-        df = self.clean_data(df)
-        df = self.feature_scaling(df)
+        HousePrices._is_train_debug = 1
+        if not HousePrices._is_train_debug:
+            self.feature_mapping_to_numerical_values(df)
+            self.feature_engineering(df)
+            df = self.clean_data(df)
+            df = self.feature_scaling(df)
+
+            is_save_dataframe = 0
+            if is_save_dataframe:
+                self.save_dataframe(df)
+                HousePrices._is_dataframe_with_sale_price = 0
+        else:
+            # Todo: create and save dataframe for debuggin in case of one-hot encoding
+            # if HousePrices._is_train_debug:
+            df = self.load_dataframe()
+            HousePrices._non_numerical_feature_names = HousePrices.extract_non_numerical_features(df)._get_axis(1)
+            HousePrices._numerical_feature_names = HousePrices.extract_numerical_features(df)
+            HousePrices._is_dataframe_with_sale_price = 0
+
         df = self.drop_variable(df)
         return df
 
@@ -296,17 +363,17 @@ class HousePrices(object):
         df = df.copy()
         # Standardization (centering and scaling) of dataset that removes mean and scales to unit variance
         standard_scaler = StandardScaler()
-        numerical_feature_names_of_non_modified_df = HousePrices.numerical_feature_names
+        numerical_feature_names_of_non_modified_df = HousePrices._numerical_feature_names
         if any(tuple(df.columns == 'SalePrice')):
-            if not HousePrices.is_one_hot_encoder:
+            if not HousePrices._is_one_hot_encoder:
                 # Todo: merge the two variables of type pandas.indexes.base.Index
                 # we need the feature_nameNum features
                 # numerical_feature_names_of_non_modified_df = numerical_feature_names_of_non_modified_df.insert(
-                # np.shape(numerical_feature_names_of_non_modified_df)[0], HousePrices.non_numerical_feature_names)
+                # np.shape(numerical_feature_names_of_non_modified_df)[0], HousePrices._non_numerical_feature_names)
                 # numerical_feature_names_of_non_modified_df = numerical_feature_names_of_non_modified_df.insert(
-                # np.shape(numerical_feature_names_of_non_modified_df)[0], HousePrices.feature_names_num)
+                # np.shape(numerical_feature_names_of_non_modified_df)[0], HousePrices._feature_names_num)
                 numerical_feature_names_of_non_modified_df = np.concatenate(
-                    [HousePrices.feature_names_num.values, numerical_feature_names_of_non_modified_df.values])
+                    [HousePrices._feature_names_num.values, numerical_feature_names_of_non_modified_df.values])
             # Include scaling of SalePrice
             y = df.SalePrice.values
             relevant_features = df[numerical_feature_names_of_non_modified_df].columns[
@@ -319,9 +386,9 @@ class HousePrices(object):
             else:
                 df.loc[:, tuple(relevant_features)] = res
         else:
-            if not HousePrices.is_one_hot_encoder:
+            if not HousePrices._is_one_hot_encoder:
                 numerical_feature_names_of_non_modified_df = np.concatenate(
-                    [HousePrices.feature_names_num.values, numerical_feature_names_of_non_modified_df.values])
+                    [HousePrices._feature_names_num.values, numerical_feature_names_of_non_modified_df.values])
 
             relevant_features = df[numerical_feature_names_of_non_modified_df].columns[
                 (df[numerical_feature_names_of_non_modified_df].columns != 'Id')]
@@ -374,8 +441,9 @@ class HousePrices(object):
         residuals = np.absolute(y_predicted - y_test_split)
         rmse_pred_vs_actual = self.rmse(y_predicted, y_test_split)
         outliers_mask = residuals >= rmse_pred_vs_actual
-        outliers_mask = np.insert(np.zeros((np.shape(y_train_split)[0],), dtype=np.int), np.shape(y_train_split)[0],
-                                  outliers_mask)
+        # outliers_mask = np.insert(np.zeros((np.shape(y_train_split)[0],), dtype=np.int), np.shape(y_train_split)[0],
+        #                           outliers_mask)
+        outliers_mask = np.concatenate([np.zeros((np.shape(y_train_split)[0],), dtype=bool), outliers_mask])
         not_an_outlier = outliers_mask == 0
         # Resample the training set from split, since the set was randomly split
         x_out = np.insert(x_train_split, np.shape(x_train_split)[0], x_test_split, axis=0)
@@ -474,7 +542,7 @@ def main():
     df_test_publ = house_prices.df_test.copy()
 
     df = house_prices.prepare_data_random_forest(df_publ)
-    house_prices.df_all_feature_var_names = df[df.columns[df.columns != 'SalePrice']].columns
+    # house_prices.df_all_feature_var_names = df[df.columns[df.columns != 'SalePrice']].columns
     print('\n TRAINING DATA:----------------------------------------------- \n')
     print(df.head(3))
     print('\n')
@@ -498,9 +566,26 @@ def main():
     df = df[house_prices.df_test_all_feature_var_names.insert(np.shape(house_prices.df_test_all_feature_var_names)[0],
                                                               'SalePrice')]
     df_test = df_test[house_prices.df_test_all_feature_var_names]
-    train_data = df[house_prices.extract_numerical_features(df)].values
-    test_data = df_test[house_prices.extract_numerical_features(df_test)].values
-    # print(sum(np.isnan(train_data)).sum()) # 348 is nan
+    df_test_num_features = house_prices.extract_numerical_features(df_test)
+    # Todo: consider applying initial test of agglomeration at this point
+    # put the two data sets together since otherwise a different agglomeration will be done
+    # Even imputation would improve if we would put the two sets together since we are only paying the y-target column
+    # but in return we get a fit with all the extra samples of the test data.
+    # Todo: can we be sure that the two dataframes are sorted the same way?
+    is_with_agglomeration = 1
+    if is_with_agglomeration:
+        df_merged_train_and_test = pd.DataFrame(data=np.concatenate((df[df.columns[df.columns != 'SalePrice']].values,
+                                                                     df_test.values)),
+                                                columns=house_prices.df_test_all_feature_var_names)
+        df_merged_train_and_test = df_merged_train_and_test[df_test_num_features]
+        df_merged_train_and_test = HousePrices.feature_agglomeration(df_merged_train_and_test)
+        train_data = np.concatenate((df_merged_train_and_test.values[:df.shape[0], 0::],
+                                     np.reshape(df.SalePrice.values, (df.SalePrice.values.shape[0], 1))), axis=1)
+        test_data = df_merged_train_and_test.values[df.shape[0]::, 0::]
+    else:
+        train_data = df[df_test_num_features].values
+        test_data = df_test[df_test_num_features].values
+        # print(sum(np.isnan(train_data)).sum()) # 348 is nan
 
     is_simple_model = 0
     if is_simple_model:
